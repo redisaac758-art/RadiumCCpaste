@@ -8,7 +8,7 @@ local UserInputService = game:GetService("UserInputService")
 local BASE_URL = "https://raw.githubusercontent.com/redisaac758-art/RadiumCCpaste/main/"
 
 -- Platform Detection
-local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+local IS_MOBILE = UserInputService.TouchEnabled and (not UserInputService.MouseEnabled or not UserInputService.KeyboardEnabled)
 local targetUIFile = IS_MOBILE and "mobile_ui.lua" or "main_ui.lua"
 
 -- 1. Load Targeted Platform UI

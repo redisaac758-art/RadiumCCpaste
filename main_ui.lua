@@ -322,7 +322,14 @@ local function createCard(parent, title)
     stroke(card, THEME.BorderDim, 1)
     padding(card, 10, 10, 8, 10)
 
+    local cardLayout = Instance.new("UIListLayout")
+    cardLayout.Padding = UDim.new(0, 6)
+    cardLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    cardLayout.Parent = card
+
     local head = Instance.new("Frame")
+    head.Name = "CardHeader"
+    head.LayoutOrder = 1
     head.Size = UDim2.new(1, 0, 0, 22)
     head.BackgroundTransparency = 1
     head.Parent = card
@@ -347,16 +354,17 @@ local function createCard(parent, title)
     lbl.Parent = head
 
     local div = Instance.new("Frame")
+    div.Name = "Divider"
+    div.LayoutOrder = 2
     div.Size = UDim2.new(1, 0, 0, 1)
-    div.Position = UDim2.fromOffset(0, 26)
     div.BackgroundColor3 = THEME.BorderDim
     div.BorderSizePixel = 0
     div.Parent = card
 
     local body = Instance.new("Frame")
     body.Name = "Body"
+    body.LayoutOrder = 3
     body.BackgroundTransparency = 1
-    body.Position = UDim2.fromOffset(0, 32)
     body.Size = UDim2.new(1, 0, 0, 0)
     body.AutomaticSize = Enum.AutomaticSize.Y
     body.Parent = card

@@ -1,7 +1,7 @@
 --[[
     mobile_ui.lua
-    Dedicated Touch-First Atomware UI for Mobile Players (Trident Survival)
-    Features Fixed Non-Scrolling Navigation, Floating Action Buttons & Touch Optimizations
+    Ultra-Polished Mobile UI for Atomware (Trident Survival)
+    Features Non-Scrolling Fixed Navigation, Robust Card Container Layout, Touch Aimlock & 100% Guaranteed Widget Visibility
 ]]
 
 local Players = game:GetService("Players")
@@ -49,20 +49,20 @@ end
 
 local THEME = {
     Background      = Color3.fromRGB(8, 6, 15),
-    Header          = Color3.fromRGB(12, 8, 22),
-    Card            = Color3.fromRGB(16, 11, 28),
-    CardAlt         = Color3.fromRGB(22, 15, 38),
-    CardHover       = Color3.fromRGB(28, 18, 48),
+    Header          = Color3.fromRGB(13, 9, 24),
+    Card            = Color3.fromRGB(16, 11, 30),
+    CardAlt         = Color3.fromRGB(24, 16, 44),
+    CardHover       = Color3.fromRGB(32, 20, 56),
 
-    Border          = Color3.fromRGB(95, 40, 175),
-    BorderDim       = Color3.fromRGB(48, 26, 85),
+    Border          = Color3.fromRGB(105, 45, 195),
+    BorderDim       = Color3.fromRGB(55, 30, 95),
     Accent          = Color3.fromRGB(157, 48, 255),
     AccentBright    = Color3.fromRGB(205, 104, 255),
-    AccentDark      = Color3.fromRGB(76, 25, 136),
+    AccentDark      = Color3.fromRGB(80, 26, 142),
 
     Text            = Color3.fromRGB(245, 241, 255),
-    TextMuted       = Color3.fromRGB(165, 150, 195),
-    TextDim         = Color3.fromRGB(105, 90, 130),
+    TextMuted       = Color3.fromRGB(170, 155, 205),
+    TextDim         = Color3.fromRGB(110, 95, 140),
 
     Green           = Color3.fromRGB(42, 255, 157),
     Red             = Color3.fromRGB(255, 75, 125),
@@ -124,23 +124,17 @@ end)
 local function makeFloatingButton(name, text, iconColor, initPos, onClick)
     local btn = Instance.new("TextButton")
     btn.Name = name
-    btn.Size = UDim2.fromOffset(54, 54)
+    btn.Size = UDim2.fromOffset(52, 52)
     btn.Position = initPos
     btn.BackgroundColor3 = THEME.Header
     btn.Text = text
     btn.TextColor3 = iconColor or THEME.AccentBright
-    btn.TextSize = 18
+    btn.TextSize = 20
     btn.Font = FONT_BOLD
     btn.AutoButtonColor = false
     btn.Parent = ScreenGui
     corner(btn, 16)
     stroke(btn, THEME.Accent, 1.5)
-
-    local glow = Instance.new("UIStroke")
-    glow.Color = THEME.Accent
-    glow.Thickness = 4
-    glow.Transparency = 0.75
-    glow.Parent = btn
 
     local isDragging = false
     local dragStart, startPos
@@ -175,9 +169,8 @@ local function makeFloatingButton(name, text, iconColor, initPos, onClick)
     return btn
 end
 
--- Floating Menu Toggle
+-- Floating Menu Toggle & Floating Aimlock
 local MobileToggleBtn
--- Floating Aimlock Trigger Button (Hold/Tap to Lock on Mobile)
 local MobileAimBtn
 
 --//==================================================
@@ -188,7 +181,7 @@ local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 MainFrame.Position = UDim2.fromScale(0.5, 0.5)
-MainFrame.Size = UDim2.new(0.94, 0, 0.90, 0)
+MainFrame.Size = UDim2.new(0.94, 0, 0.88, 0)
 MainFrame.BackgroundColor3 = THEME.Background
 MainFrame.BorderSizePixel = 0
 MainFrame.ClipsDescendants = true
@@ -202,7 +195,7 @@ local function setUIVisible(state)
     if state then
         MainFrame.Visible = true
         tween(MainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-            Size = UDim2.new(0.94, 0, 0.90, 0)
+            Size = UDim2.new(0.94, 0, 0.88, 0)
         })
     else
         tween(MainFrame, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
@@ -213,29 +206,29 @@ local function setUIVisible(state)
     end
 end
 
-MobileToggleBtn = makeFloatingButton("MobileToggle", "A", THEME.AccentBright, UDim2.new(1, -70, 1, -140), function()
+MobileToggleBtn = makeFloatingButton("MobileToggle", "A", THEME.AccentBright, UDim2.new(1, -66, 1, -130), function()
     setUIVisible(not UIVisible)
 end)
 
 local mobileAimActive = false
-MobileAimBtn = makeFloatingButton("MobileAimlock", "🎯", THEME.Green, UDim2.new(1, -70, 1, -210), function()
+MobileAimBtn = makeFloatingButton("MobileAimlock", "🎯", THEME.Green, UDim2.new(1, -66, 1, -195), function()
     mobileAimActive = not mobileAimActive
     _G.FireEvent("MobileAimTrigger", mobileAimActive)
     MobileAimBtn.TextColor3 = mobileAimActive and THEME.Red or THEME.Green
     MobileAimBtn.Text = mobileAimActive and "🔒" or "🎯"
 end)
 
--- Window Header (Fixed, Never Scrolls)
+-- Fixed Header (Never Scrolls)
 local Header = Instance.new("Frame")
 Header.Name = "Header"
-Header.Size = UDim2.new(1, 0, 0, 48)
+Header.Size = UDim2.new(1, 0, 0, 46)
 Header.BackgroundColor3 = THEME.Header
 Header.BorderSizePixel = 0
 Header.Parent = MainFrame
 stroke(Header, THEME.BorderDim, 1)
 
 local HeaderAccent = Instance.new("Frame")
-HeaderAccent.Size = UDim2.fromOffset(4, 26)
+HeaderAccent.Size = UDim2.fromOffset(4, 24)
 HeaderAccent.Position = UDim2.fromOffset(12, 11)
 HeaderAccent.BackgroundColor3 = THEME.Accent
 HeaderAccent.BorderSizePixel = 0
@@ -255,12 +248,12 @@ Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Parent = Header
 
 local CloseBtn = Instance.new("TextButton")
-CloseBtn.Size = UDim2.fromOffset(36, 30)
-CloseBtn.Position = UDim2.new(1, -44, 0, 9)
+CloseBtn.Size = UDim2.fromOffset(34, 28)
+CloseBtn.Position = UDim2.new(1, -42, 0, 9)
 CloseBtn.BackgroundColor3 = THEME.Card
 CloseBtn.Text = "✕"
 CloseBtn.TextColor3 = THEME.Red
-CloseBtn.TextSize = 14
+CloseBtn.TextSize = 13
 CloseBtn.Font = FONT_BOLD
 CloseBtn.AutoButtonColor = false
 CloseBtn.Parent = Header
@@ -268,17 +261,18 @@ corner(CloseBtn, 6)
 stroke(CloseBtn, THEME.BorderDim, 1)
 CloseBtn.MouseButton1Click:Connect(function() setUIVisible(false) end)
 
--- Navigation Tab Bar (Fixed, Always Visible Below Header)
+-- Navigation Tab Bar (Fixed, Stays Locked Under Header)
 local TabBar = Instance.new("ScrollingFrame")
 TabBar.Name = "TabBar"
-TabBar.Size = UDim2.new(1, 0, 0, 44)
-TabBar.Position = UDim2.fromOffset(0, 48)
+TabBar.Size = UDim2.new(1, 0, 0, 42)
+TabBar.Position = UDim2.fromOffset(0, 46)
 TabBar.BackgroundColor3 = THEME.Header
 TabBar.BorderSizePixel = 0
 TabBar.ScrollBarThickness = 0
+TabBar.CanvasSize = UDim2.new(0, 0, 0, 0)
 TabBar.AutomaticCanvasSize = Enum.AutomaticSize.X
 TabBar.Parent = MainFrame
-padding(TabBar, 8, 8, 5, 5)
+padding(TabBar, 8, 8, 4, 4)
 
 local TabListLayout = Instance.new("UIListLayout")
 TabListLayout.FillDirection = Enum.FillDirection.Horizontal
@@ -290,8 +284,8 @@ TabListLayout.Parent = TabBar
 local ContentArea = Instance.new("Frame")
 ContentArea.Name = "ContentArea"
 ContentArea.BackgroundTransparency = 1
-ContentArea.Position = UDim2.fromOffset(0, 94)
-ContentArea.Size = UDim2.new(1, 0, 1, -94)
+ContentArea.Position = UDim2.fromOffset(0, 88)
+ContentArea.Size = UDim2.new(1, 0, 1, -88)
 ContentArea.Parent = MainFrame
 
 local Pages = {}
@@ -304,8 +298,9 @@ local function createPage(name)
     page.BackgroundTransparency = 1
     page.BorderSizePixel = 0
     page.Size = UDim2.new(1, 0, 1, 0)
+    page.CanvasSize = UDim2.new(0, 0, 0, 0)
     page.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    page.ScrollBarThickness = 3
+    page.ScrollBarThickness = 4
     page.ScrollBarImageColor3 = THEME.Accent
     page.Visible = false
     page.Parent = ContentArea
@@ -335,7 +330,7 @@ local function switchPage(name)
 end
 
 --//==================================================
---// MOBILE WIDGET BUILDERS (TOUCH-OPTIMIZED CARDS)
+--// ROBUST CARD CONTAINER WIDGET BUILDER
 --//==================================================
 
 local function createCard(parent, title)
@@ -349,14 +344,22 @@ local function createCard(parent, title)
     stroke(card, THEME.BorderDim, 1)
     padding(card, 12, 12, 10, 12)
 
+    local cardLayout = Instance.new("UIListLayout")
+    cardLayout.Padding = UDim.new(0, 8)
+    cardLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    cardLayout.Parent = card
+
+    -- Card Header
     local head = Instance.new("Frame")
-    head.Size = UDim2.new(1, 0, 0, 24)
+    head.Name = "CardHeader"
+    head.LayoutOrder = 1
+    head.Size = UDim2.new(1, 0, 0, 22)
     head.BackgroundTransparency = 1
     head.Parent = card
 
     local acc = Instance.new("Frame")
     acc.Size = UDim2.fromOffset(3, 16)
-    acc.Position = UDim2.fromOffset(0, 4)
+    acc.Position = UDim2.fromOffset(0, 3)
     acc.BackgroundColor3 = THEME.Accent
     acc.BorderSizePixel = 0
     acc.Parent = head
@@ -373,25 +376,28 @@ local function createCard(parent, title)
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = head
 
+    -- Divider
     local div = Instance.new("Frame")
+    div.Name = "Divider"
+    div.LayoutOrder = 2
     div.Size = UDim2.new(1, 0, 0, 1)
-    div.Position = UDim2.fromOffset(0, 28)
     div.BackgroundColor3 = THEME.BorderDim
     div.BorderSizePixel = 0
     div.Parent = card
 
+    -- Card Body
     local body = Instance.new("Frame")
     body.Name = "Body"
+    body.LayoutOrder = 3
     body.BackgroundTransparency = 1
-    body.Position = UDim2.fromOffset(0, 36)
     body.Size = UDim2.new(1, 0, 0, 0)
     body.AutomaticSize = Enum.AutomaticSize.Y
     body.Parent = card
 
-    local list = Instance.new("UIListLayout")
-    list.Padding = UDim.new(0, 8)
-    list.SortOrder = Enum.SortOrder.LayoutOrder
-    list.Parent = body
+    local bodyLayout = Instance.new("UIListLayout")
+    bodyLayout.Padding = UDim.new(0, 8)
+    bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    bodyLayout.Parent = body
 
     return card, body
 end
@@ -478,18 +484,18 @@ local function createSlider(parent, setting, min, max, default, step, suffix)
     valLbl.Parent = row
 
     local track = Instance.new("Frame")
-    track.Size = UDim2.new(1, 0, 0, 12)
+    track.Size = UDim2.new(1, 0, 0, 10)
     track.Position = UDim2.fromOffset(0, 26)
     track.BackgroundColor3 = THEME.CardAlt
     track.Parent = row
-    corner(track, 6)
+    corner(track, 5)
     stroke(track, THEME.BorderDim, 1)
 
     local fill = Instance.new("Frame")
     fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
     fill.BackgroundColor3 = THEME.Accent
     fill.Parent = track
-    corner(fill, 6)
+    corner(fill, 5)
 
     local knob = Instance.new("Frame")
     knob.Size = UDim2.fromOffset(18, 18)
@@ -727,7 +733,7 @@ local function createColorPicker(parent, setting, defaultColor)
 end
 
 --//==================================================
---// BUILD MOBILE TABS & SECTIONS
+--// POPULATE ALL TABS & SECTIONS
 --//==================================================
 
 local tabsData = {
@@ -743,9 +749,9 @@ for _, t in ipairs(tabsData) do
     createPage(pName)
 
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.fromOffset(92, 34)
+    btn.Size = UDim2.fromOffset(100, 34)
     btn.BackgroundColor3 = THEME.Card
-    btn.Text = t.Icon .. " " .. pName
+    btn.Text = t.Icon .. "  " .. pName
     btn.TextColor3 = THEME.TextMuted
     btn.TextSize = 12
     btn.Font = FONT_BOLD
