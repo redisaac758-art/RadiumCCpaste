@@ -943,8 +943,195 @@ UserInputService.InputBegan:Connect(function(input, gpe)
     if not gpe then activeKeys[input.KeyCode] = true end
 end)
 
-UserInputService.InputEnded:Connect(function(input)
-    activeKeys[input.KeyCode] = nil
+--//==================================================
+--// ADVANCED MATERIAL CHAMS SYSTEM (PORTED)
+--//==================================================
+
+local MatState = {
+    Enabled    = false,
+    Material   = "ForceField",
+    TeamCheck  = false,
+    SeeThrough = true,
+    Color      = Color3.fromRGB(120, 200, 255),
+}
+
+local MatApplied = {}
+
+local MatPresets = {
+    ["ForceField"] = { material = Enum.Material.ForceField,  reflectance = 0,   transparency = 0,   tint = true  },
+    ["Neon"]       = { material = Enum.Material.Neon,         reflectance = 0,   transparency = 0,   tint = true  },
+    ["Glass"]      = { material = Enum.Material.Glass,        reflectance = 0.3, transparency = 0.4, tint = true  },
+    ["Marble"]     = { material = Enum.Material.Marble,       reflectance = 0,   transparency = 0,   tint = false },
+    ["Foil"]       = { material = Enum.Material.Foil,         reflectance = 0.4, transparency = 0,   tint = false },
+    ["Metal"]      = { material = Enum.Material.DiamondPlate, reflectance = 0.5, transparency = 0,   tint = false },
+    ["Wood"]       = { material = Enum.Material.WoodPlanks,   reflectance = 0,   transparency = 0,   tint = false },
+    ["Ice"]        = { material = Enum.Material.Ice,          reflectance = 0.2, transparency = 0.2, tint = true  },
+}
+
+local function isBodyPart(inst)
+    return inst:IsA("BasePart") and inst.Name ~= "HumanoidRootPart"
+end
+
+local function restoreMatPlayer(plr)
+    local rec = MatApplied[plr]
+    if not rec then return end
+    for part, orig in pairs(rec.originals) do
+        if part and part.Parent then
+            part.Material     = orig.Material
+            part.Reflectance  = orig.Reflectance
+            part.Color        = orig.Color
+            part.Transparency = orig.Transparency
+            if orig.TextureID ~= nil and part:IsA("MeshPart") then
+                part.TextureID = orig.TextureID
+            end
+        end
+    end
+    for inst, parentRef in pairs(rec.hidden) do
+        if inst then
+            pcall(function() inst.Parent = parentRef end)
+        end
+    end
+    if rec.highlight then
+        pcall(function() rec.highlight:Destroy() end)
+    end
+    MatApplied[plr] = nil
+end
+
+local function hideOverlay(rec, inst)
+    if rec.hidden[inst] == nil and inst.Parent then
+        rec.hidden[inst] = inst.Parent
+        pcall(function() inst.Parent = nil end)
+    end
+end
+
+local function applyMatPlayer(plr)
+    if plr == LocalPlayer then return end
+    if MatState.TeamCheck and plr.Team and LocalPlayer.Team and plr.Team == LocalPlayer.Team then
+        restoreMatPlayer(plr)
+        return
+    end
+
+    local char = plr.Character
+    if not char then return end
+
+    local preset = MatPresets[MatState.Material]
+    if not preset then return end
+
+    local rec = MatApplied[plr]
+    if not rec then
+        rec = { originals = {}, hidden = {}, highlight = nil }
+        MatApplied[plr] = rec
+    end
+
+    for _, inst in ipairs(char:GetDescendants()) do
+        if isBodyPart(inst) then
+            local part = inst
+            if not rec.originals[part] then
+                rec.originals[part] = {
+                    Material     = part.Material,
+                    Reflectance  = part.Reflectance,
+                    Color        = part.Color,
+                    Transparency = part.Transparency,
+                    TextureID    = part:IsA("MeshPart") and part.TextureID or nil,
+                }
+            end
+            part.Material     = preset.material
+            part.Reflectance  = preset.reflectance
+            part.Transparency = preset.transparency or 0
+            if part:IsA("MeshPart") then
+                part.TextureID = ""
+            end
+            if preset.tint then
+                part.Color = MatState.Color
+            end
+        elseif inst:IsA("Shirt") or inst:IsA("Pants") or inst:IsA("ShirtGraphic")
+            or inst:IsA("Decal") or inst:IsA("Texture") or inst:IsA("SurfaceAppearance") then
+            hideOverlay(rec, inst)
+        end
+    end
+
+    if MatState.SeeThrough then
+        if not rec.highlight or not rec.highlight.Parent then
+            local hl = Instance.new("Highlight")
+            hl.Name = "MatChamsGlow"
+            hl.FillTransparency = 1
+            hl.OutlineTransparency = 0
+            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            hl.Adornee = char
+            pcall(function() hl.Parent = game:GetService("CoreGui") end)
+            if not hl.Parent then hl.Parent = char end
+            rec.highlight = hl
+        end
+        rec.highlight.Adornee = char
+        rec.highlight.OutlineColor = MatState.Color
+    elseif rec.highlight then
+        rec.highlight:Destroy()
+        rec.highlight = nil
+    end
+end
+
+local function restoreAllMatPlayers()
+    for plr in pairs(MatApplied) do
+        restoreMatPlayer(plr)
+    end
+end
+
+local function refreshAllMatPlayers()
+    if not MatState.Enabled then
+        restoreAllMatPlayers()
+        return
+    end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        applyMatPlayer(plr)
+    end
+end
+
+RunService.RenderStepped:Connect(function()
+    if not MatState.Enabled then return end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            applyMatPlayer(plr)
+        end
+    end
+end)
+
+Players.PlayerAdded:Connect(function(plr)
+    plr.CharacterAdded:Connect(function()
+        task.wait(0.3)
+        if MatState.Enabled then applyMatPlayer(plr) end
+    end)
+end)
+
+Players.PlayerRemoving:Connect(function(plr)
+    restoreMatPlayer(plr)
+end)
+
+_G.OnToggle("Enable Material Chams", function(v)
+    MatState.Enabled = v
+    refreshAllMatPlayers()
+end)
+
+_G.OnDropdown("Chams Material", function(sel)
+    if MatPresets[sel] then
+        restoreAllMatPlayers()
+        MatState.Material = sel
+        refreshAllMatPlayers()
+    end
+end)
+
+_G.OnColorPicker("Chams Color", function(c)
+    MatState.Color = c
+    refreshAllMatPlayers()
+end)
+
+_G.OnToggle("Chams See Through", function(v)
+    MatState.SeeThrough = v
+    refreshAllMatPlayers()
+end)
+
+_G.OnToggle("Chams Team Check", function(v)
+    MatState.TeamCheck = v
+    refreshAllMatPlayers()
 end)
 
 print("Atomware Features Script Engine Loaded & Bound.")

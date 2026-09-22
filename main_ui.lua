@@ -976,6 +976,13 @@ createToggle(bVehicleESP, "Helicopter", false)
 createToggle(bVehicleESP, "Trolly", false)
 createToggle(bVehicleESP, "Vehicle Distance Esp", false)
 
+local sMatChams, bMatChams = createSection(pageVisuals, "Player Material Chams", 240)
+createToggle(bMatChams, "Enable Material Chams", false)
+createDropdown(bMatChams, "Chams Material", { "ForceField", "Neon", "Glass", "Ice", "Marble", "Foil", "Metal", "Wood" }, "ForceField")
+createColorPicker(bMatChams, "Chams Color", Color3.fromRGB(120, 200, 255))
+createToggle(bMatChams, "Chams See Through", true)
+createToggle(bMatChams, "Chams Team Check", false)
+
 -- ---------------------------------------------------
 -- TAB 2: COMBAT
 -- ---------------------------------------------------
