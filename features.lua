@@ -1134,4 +1134,5 @@ _G.OnToggle("Chams Team Check", function(v)
     refreshAllMatPlayers()
 end)
 
-print("Atomware Features Script Engine Loaded & Bound.")
+_G.AtomwareFeaturesLoaded = true
+print("Good to go")

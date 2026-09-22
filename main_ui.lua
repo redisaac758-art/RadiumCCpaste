@@ -1170,27 +1170,30 @@ end)
 workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateResponsiveLayout)
 updateResponsiveLayout()
 
-print("Atomware UI Shell Loaded Successfully.")
+_G.AtomwareUILoaded = true
+print("Good to go")
 
 --//==================================================
---// BOOTSTRAP EXTERNAL FEATURES SCRIPT FROM GITHUB
+--// BOOTSTRAP EXTERNAL FEATURES SCRIPT FROM GITHUB (IF NOT LOADED)
 --//==================================================
 
 task.spawn(function()
-    local url = "https://raw.githubusercontent.com/redisaac758-art/RadiumCCpaste/main/features.lua"
-    local success, scriptContent = pcall(function()
-        return game:HttpGet(url)
-    end)
+    task.wait(0.1)
+    if not _G.AtomwareFeaturesLoaded then
+        local url = "https://raw.githubusercontent.com/redisaac758-art/RadiumCCpaste/main/features.lua"
+        local success, scriptContent = pcall(function()
+            return game:HttpGet(url)
+        end)
 
-    if success and scriptContent then
-        local fn, err = loadstring(scriptContent)
-        if fn then
-            fn()
-            print("Successfully loaded features backend script.")
+        if success and scriptContent then
+            local fn, err = loadstring(scriptContent)
+            if fn then
+                fn()
+            else
+                warn("Failed to compile features.lua:", err)
+            end
         else
-            warn("Failed to compile features.lua:", err)
+            warn("Failed to fetch features.lua from GitHub repository:", url)
         end
-    else
-        warn("Failed to fetch features.lua from GitHub repository:", url)
     end
 end)
