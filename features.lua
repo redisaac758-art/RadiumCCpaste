@@ -28,7 +28,7 @@ repeat task.wait() until _G.OnToggle and _G.OnSlider and _G.OnDropdown and _G.On
 
 local AimbotConfig = {
     Enabled = false,
-    Mode = "Hold Aim Key", -- "Hold Aim Key" | "Always On" | "Tap / Toggle"
+    Mode = "Controller Bind", -- "Controller Bind" | "Always On" | "Hold Toggle"
     ShowFOV = true,
     FOV = 130,
     Smoothing = 0.15,
@@ -105,8 +105,8 @@ end
 -- Input Listeners for Aimbot
 UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
-    if input.UserInputType == AimbotConfig.AimKey or input.KeyCode == AimbotConfig.AimKey or input.KeyCode == Enum.KeyCode.ButtonRT or input.KeyCode == Enum.KeyCode.ButtonLT then
-        if AimbotConfig.Mode == "Tap / Toggle" then
+    if input.UserInputType == AimbotConfig.AimKey or input.KeyCode == AimbotConfig.AimKey then
+        if AimbotConfig.Mode == "Hold Toggle" then
             AimbotConfig.ToggleState = not AimbotConfig.ToggleState
         else
             AimbotConfig.Active = true
@@ -115,8 +115,8 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == AimbotConfig.AimKey or input.KeyCode == AimbotConfig.AimKey or input.KeyCode == Enum.KeyCode.ButtonRT or input.KeyCode == Enum.KeyCode.ButtonLT then
-        if AimbotConfig.Mode == "Hold Aim Key" then
+    if input.UserInputType == AimbotConfig.AimKey or input.KeyCode == AimbotConfig.AimKey then
+        if AimbotConfig.Mode == "Controller Bind" then
             AimbotConfig.Active = false
         end
     end
@@ -142,7 +142,7 @@ RunService.RenderStepped:Connect(function()
         local shouldAim = false
         if AimbotConfig.Mode == "Always On" then
             shouldAim = true
-        elseif AimbotConfig.Mode == "Tap / Toggle" then
+        elseif AimbotConfig.Mode == "Hold Toggle" then
             shouldAim = AimbotConfig.ToggleState
         else
             shouldAim = AimbotConfig.Active
@@ -299,6 +299,10 @@ end
 
 local function registerESP(model)
     if espCache[model] then return end
+    -- Never draw ESP on the local player's own character
+    if model == LocalPlayer.Character then return end
+    -- Also skip if model is the local player character by player check
+    if Players:GetPlayerFromCharacter(model) == LocalPlayer then return end
     local head, torso = getPlayerParts(model)
     if not head or not torso then return end
 
@@ -360,6 +364,19 @@ Workspace.ChildAdded:Connect(function(c)
     if c:IsA("Model") then registerESP(c) end
 end)
 
+-- Ensure local player's character is never kept in espCache across respawns
+LocalPlayer.CharacterAdded:Connect(function(char)
+    if espCache[char] then
+        local d = espCache[char]
+        pcall(function() d.box:Remove() end)
+        pcall(function() d.outline:Remove() end)
+        pcall(function() d.text:Remove() end)
+        pcall(function() d.weaponText:Remove() end)
+        for _, l in ipairs(d.skeletonLines) do pcall(function() l.line:Remove() end) end
+        espCache[char] = nil
+    end
+end)
+
 task.spawn(function()
     while true do
         for m in pairs(espCache) do
@@ -383,6 +400,15 @@ RunService.RenderStepped:Connect(function()
 
     local camPos = Camera.CFrame.Position
     for model, d in pairs(espCache) do
+        -- Skip local player's own character
+        if model == LocalPlayer.Character or Players:GetPlayerFromCharacter(model) == LocalPlayer then
+            d.box.Visible = false
+            d.outline.Visible = false
+            d.text.Visible = false
+            d.weaponText.Visible = false
+            for _, sk in ipairs(d.skeletonLines) do sk.line.Visible = false end
+            continue
+        end
         local valid = true
         local head, torso = d.head, d.torso
         if not head or not torso or not head.Parent or not torso.Parent then
