@@ -1,7 +1,7 @@
 --[[
-    Atomware UI (main_ui.lua)
-    Desktop & Xbox Controller UI Framework (Trident Survival)
-    Features Fixed Non-Scrolling Sidebar & Header, Two-Column Responsive Cards & Full Gamepad Navigation
+    mobile_ui.lua
+    Dedicated Touch-First Atomware UI for Mobile Players (Trident Survival)
+    Features Fixed Non-Scrolling Navigation, Floating Action Buttons & Touch Optimizations
 ]]
 
 local Players = game:GetService("Players")
@@ -44,26 +44,25 @@ _G.FireEvent = function(name, ...)
 end
 
 --//==================================================
---// THEME & STYLING
+--// MOBILE THEME & STYLING
 --//==================================================
 
 local THEME = {
-    Background      = Color3.fromRGB(6, 4, 12),
-    Header          = Color3.fromRGB(10, 7, 20),
-    Sidebar         = Color3.fromRGB(10, 7, 20),
-    Card            = Color3.fromRGB(14, 9, 26),
-    CardAlt         = Color3.fromRGB(19, 13, 35),
-    CardHover       = Color3.fromRGB(25, 16, 45),
+    Background      = Color3.fromRGB(8, 6, 15),
+    Header          = Color3.fromRGB(12, 8, 22),
+    Card            = Color3.fromRGB(16, 11, 28),
+    CardAlt         = Color3.fromRGB(22, 15, 38),
+    CardHover       = Color3.fromRGB(28, 18, 48),
 
-    Border          = Color3.fromRGB(90, 38, 165),
-    BorderDim       = Color3.fromRGB(45, 24, 80),
+    Border          = Color3.fromRGB(95, 40, 175),
+    BorderDim       = Color3.fromRGB(48, 26, 85),
     Accent          = Color3.fromRGB(157, 48, 255),
     AccentBright    = Color3.fromRGB(205, 104, 255),
-    AccentDark      = Color3.fromRGB(70, 24, 125),
+    AccentDark      = Color3.fromRGB(76, 25, 136),
 
     Text            = Color3.fromRGB(245, 241, 255),
-    TextMuted       = Color3.fromRGB(155, 142, 185),
-    TextDim         = Color3.fromRGB(95, 82, 122),
+    TextMuted       = Color3.fromRGB(165, 150, 195),
+    TextDim         = Color3.fromRGB(105, 90, 130),
 
     Green           = Color3.fromRGB(42, 255, 157),
     Red             = Color3.fromRGB(255, 75, 125),
@@ -109,7 +108,7 @@ end
 --//==================================================
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "AtomwareUI"
+ScreenGui.Name = "AtomwareMobileUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = true
 ScreenGui.DisplayOrder = 100
@@ -119,14 +118,77 @@ pcall(function()
 end)
 
 --//==================================================
---// MAIN WINDOW CONTAINER
+--// FLOATING ACTION BUTTONS (MOBILE DRAGGABLE)
+--//==================================================
+
+local function makeFloatingButton(name, text, iconColor, initPos, onClick)
+    local btn = Instance.new("TextButton")
+    btn.Name = name
+    btn.Size = UDim2.fromOffset(54, 54)
+    btn.Position = initPos
+    btn.BackgroundColor3 = THEME.Header
+    btn.Text = text
+    btn.TextColor3 = iconColor or THEME.AccentBright
+    btn.TextSize = 18
+    btn.Font = FONT_BOLD
+    btn.AutoButtonColor = false
+    btn.Parent = ScreenGui
+    corner(btn, 16)
+    stroke(btn, THEME.Accent, 1.5)
+
+    local glow = Instance.new("UIStroke")
+    glow.Color = THEME.Accent
+    glow.Thickness = 4
+    glow.Transparency = 0.75
+    glow.Parent = btn
+
+    local isDragging = false
+    local dragStart, startPos
+
+    btn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            isDragging = true
+            dragStart = input.Position
+            startPos = btn.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    isDragging = false
+                end
+            end)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if isDragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+            local delta = input.Position - dragStart
+            btn.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+
+    btn.MouseButton1Click:Connect(function()
+        if onClick then onClick(btn) end
+    end)
+
+    return btn
+end
+
+-- Floating Menu Toggle
+local MobileToggleBtn
+-- Floating Aimlock Trigger Button (Hold/Tap to Lock on Mobile)
+local MobileAimBtn
+
+--//==================================================
+--// MAIN WINDOW CONTAINER (FIXED NON-SCROLLING HEADER & TABS)
 --//==================================================
 
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 MainFrame.Position = UDim2.fromScale(0.5, 0.5)
-MainFrame.Size = UDim2.fromOffset(880, 560)
+MainFrame.Size = UDim2.new(0.94, 0, 0.90, 0)
 MainFrame.BackgroundColor3 = THEME.Background
 MainFrame.BorderSizePixel = 0
 MainFrame.ClipsDescendants = true
@@ -134,19 +196,13 @@ MainFrame.Parent = ScreenGui
 corner(MainFrame, 12)
 stroke(MainFrame, THEME.Border, 1.5)
 
-local OuterGlow = Instance.new("UIStroke")
-OuterGlow.Color = THEME.Accent
-OuterGlow.Thickness = 8
-OuterGlow.Transparency = 0.88
-OuterGlow.Parent = MainFrame
-
 local UIVisible = true
 local function setUIVisible(state)
     UIVisible = state
     if state then
         MainFrame.Visible = true
         tween(MainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-            Size = UDim2.fromOffset(880, 560)
+            Size = UDim2.new(0.94, 0, 0.90, 0)
         })
     else
         tween(MainFrame, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
@@ -157,28 +213,19 @@ local function setUIVisible(state)
     end
 end
 
--- Dragging System
-local dragging, dragStart, startPos
-local function beginDrag(input)
-    dragging = true
-    dragStart = input.Position
-    startPos = MainFrame.Position
-    input.Changed:Connect(function()
-        if input.UserInputState == Enum.UserInputState.End then dragging = false end
-    end)
-end
-
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-        local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(
-            startPos.X.Scale, startPos.X.Offset + delta.X,
-            startPos.Y.Scale, startPos.Y.Offset + delta.Y
-        )
-    end
+MobileToggleBtn = makeFloatingButton("MobileToggle", "A", THEME.AccentBright, UDim2.new(1, -70, 1, -140), function()
+    setUIVisible(not UIVisible)
 end)
 
--- Fixed Header (Never Scrolls)
+local mobileAimActive = false
+MobileAimBtn = makeFloatingButton("MobileAimlock", "🎯", THEME.Green, UDim2.new(1, -70, 1, -210), function()
+    mobileAimActive = not mobileAimActive
+    _G.FireEvent("MobileAimTrigger", mobileAimActive)
+    MobileAimBtn.TextColor3 = mobileAimActive and THEME.Red or THEME.Green
+    MobileAimBtn.Text = mobileAimActive and "🔒" or "🎯"
+end)
+
+-- Window Header (Fixed, Never Scrolls)
 local Header = Instance.new("Frame")
 Header.Name = "Header"
 Header.Size = UDim2.new(1, 0, 0, 48)
@@ -186,12 +233,6 @@ Header.BackgroundColor3 = THEME.Header
 Header.BorderSizePixel = 0
 Header.Parent = MainFrame
 stroke(Header, THEME.BorderDim, 1)
-
-Header.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        beginDrag(input)
-    end
-end)
 
 local HeaderAccent = Instance.new("Frame")
 HeaderAccent.Size = UDim2.fromOffset(4, 26)
@@ -203,23 +244,23 @@ corner(HeaderAccent, 2)
 
 local Title = Instance.new("TextLabel")
 Title.BackgroundTransparency = 1
-Title.Text = "atomware  <font color=\"#cd68ff\">v2</font>"
+Title.Text = "atomware  <font color=\"#cd68ff\">mobile</font>"
 Title.RichText = true
-Title.Size = UDim2.new(0.4, 0, 1, 0)
+Title.Size = UDim2.new(0.6, 0, 1, 0)
 Title.Position = UDim2.fromOffset(24, 0)
-Title.TextSize = 19
+Title.TextSize = 18
 Title.TextColor3 = THEME.Text
 Title.Font = FONT_BOLD
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Parent = Header
 
 local CloseBtn = Instance.new("TextButton")
-CloseBtn.Size = UDim2.fromOffset(32, 28)
-CloseBtn.Position = UDim2.new(1, -40, 0, 10)
+CloseBtn.Size = UDim2.fromOffset(36, 30)
+CloseBtn.Position = UDim2.new(1, -44, 0, 9)
 CloseBtn.BackgroundColor3 = THEME.Card
 CloseBtn.Text = "✕"
 CloseBtn.TextColor3 = THEME.Red
-CloseBtn.TextSize = 13
+CloseBtn.TextSize = 14
 CloseBtn.Font = FONT_BOLD
 CloseBtn.AutoButtonColor = false
 CloseBtn.Parent = Header
@@ -227,47 +268,34 @@ corner(CloseBtn, 6)
 stroke(CloseBtn, THEME.BorderDim, 1)
 CloseBtn.MouseButton1Click:Connect(function() setUIVisible(false) end)
 
-local MinBtn = Instance.new("TextButton")
-MinBtn.Size = UDim2.fromOffset(32, 28)
-MinBtn.Position = UDim2.new(1, -78, 0, 10)
-MinBtn.BackgroundColor3 = THEME.Card
-MinBtn.Text = "—"
-MinBtn.TextColor3 = THEME.Text
-MinBtn.TextSize = 13
-MinBtn.Font = FONT_BOLD
-MinBtn.AutoButtonColor = false
-MinBtn.Parent = Header
-corner(MinBtn, 6)
-stroke(MinBtn, THEME.BorderDim, 1)
-MinBtn.MouseButton1Click:Connect(function() setUIVisible(false) end)
+-- Navigation Tab Bar (Fixed, Always Visible Below Header)
+local TabBar = Instance.new("ScrollingFrame")
+TabBar.Name = "TabBar"
+TabBar.Size = UDim2.new(1, 0, 0, 44)
+TabBar.Position = UDim2.fromOffset(0, 48)
+TabBar.BackgroundColor3 = THEME.Header
+TabBar.BorderSizePixel = 0
+TabBar.ScrollBarThickness = 0
+TabBar.AutomaticCanvasSize = Enum.AutomaticSize.X
+TabBar.Parent = MainFrame
+padding(TabBar, 8, 8, 5, 5)
 
--- Fixed Left Sidebar (Never Scrolls)
-local Sidebar = Instance.new("Frame")
-Sidebar.Name = "Sidebar"
-Sidebar.Size = UDim2.new(0, 180, 1, -58)
-Sidebar.Position = UDim2.fromOffset(10, 52)
-Sidebar.BackgroundColor3 = THEME.Sidebar
-Sidebar.BorderSizePixel = 0
-Sidebar.Parent = MainFrame
-corner(Sidebar, 10)
-stroke(Sidebar, THEME.BorderDim, 1)
-padding(Sidebar, 8, 8, 10, 10)
+local TabListLayout = Instance.new("UIListLayout")
+TabListLayout.FillDirection = Enum.FillDirection.Horizontal
+TabListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+TabListLayout.Padding = UDim.new(0, 6)
+TabListLayout.Parent = TabBar
 
-local SidebarLayout = Instance.new("UIListLayout")
-SidebarLayout.Padding = UDim.new(0, 6)
-SidebarLayout.Parent = Sidebar
-
--- Content Area (Scrollable Independent Pages)
+-- Content Viewport (Scrollable Content Container)
 local ContentArea = Instance.new("Frame")
 ContentArea.Name = "ContentArea"
 ContentArea.BackgroundTransparency = 1
-ContentArea.Position = UDim2.fromOffset(198, 52)
-ContentArea.Size = UDim2.new(1, -208, 1, -58)
+ContentArea.Position = UDim2.fromOffset(0, 94)
+ContentArea.Size = UDim2.new(1, 0, 1, -94)
 ContentArea.Parent = MainFrame
 
 local Pages = {}
 local TabButtons = {}
-local InteractiveElements = {}
 local CurrentPageName = "Visuals"
 
 local function createPage(name)
@@ -281,13 +309,12 @@ local function createPage(name)
     page.ScrollBarImageColor3 = THEME.Accent
     page.Visible = false
     page.Parent = ContentArea
-    padding(page, 6, 8, 2, 14)
+    padding(page, 10, 10, 8, 20)
 
-    local grid = Instance.new("UIGridLayout")
-    grid.CellPadding = UDim2.fromOffset(10, 10)
-    grid.CellSize = UDim2.new(0.5, -5, 0, 0)
-    grid.SortOrder = Enum.SortOrder.LayoutOrder
-    grid.Parent = page
+    local list = Instance.new("UIListLayout")
+    list.Padding = UDim.new(0, 10)
+    list.SortOrder = Enum.SortOrder.LayoutOrder
+    list.Parent = page
 
     Pages[name] = page
     return page
@@ -308,7 +335,7 @@ local function switchPage(name)
 end
 
 --//==================================================
---// WIDGET BUILDERS (CONTAINER CARD ARCHITECTURE)
+--// MOBILE WIDGET BUILDERS (TOUCH-OPTIMIZED CARDS)
 --//==================================================
 
 local function createCard(parent, title)
@@ -318,18 +345,18 @@ local function createCard(parent, title)
     card.Size = UDim2.new(1, 0, 0, 0)
     card.AutomaticSize = Enum.AutomaticSize.Y
     card.Parent = parent
-    corner(card, 8)
+    corner(card, 10)
     stroke(card, THEME.BorderDim, 1)
-    padding(card, 10, 10, 8, 10)
+    padding(card, 12, 12, 10, 12)
 
     local head = Instance.new("Frame")
-    head.Size = UDim2.new(1, 0, 0, 22)
+    head.Size = UDim2.new(1, 0, 0, 24)
     head.BackgroundTransparency = 1
     head.Parent = card
 
     local acc = Instance.new("Frame")
-    acc.Size = UDim2.fromOffset(3, 15)
-    acc.Position = UDim2.fromOffset(0, 3)
+    acc.Size = UDim2.fromOffset(3, 16)
+    acc.Position = UDim2.fromOffset(0, 4)
     acc.BackgroundColor3 = THEME.Accent
     acc.BorderSizePixel = 0
     acc.Parent = head
@@ -339,8 +366,8 @@ local function createCard(parent, title)
     lbl.BackgroundTransparency = 1
     lbl.Text = title
     lbl.Size = UDim2.new(1, -12, 1, 0)
-    lbl.Position = UDim2.fromOffset(8, 0)
-    lbl.TextSize = 12
+    lbl.Position = UDim2.fromOffset(10, 0)
+    lbl.TextSize = 13
     lbl.TextColor3 = THEME.Text
     lbl.Font = FONT_BOLD
     lbl.TextXAlignment = Enum.TextXAlignment.Left
@@ -348,7 +375,7 @@ local function createCard(parent, title)
 
     local div = Instance.new("Frame")
     div.Size = UDim2.new(1, 0, 0, 1)
-    div.Position = UDim2.fromOffset(0, 26)
+    div.Position = UDim2.fromOffset(0, 28)
     div.BackgroundColor3 = THEME.BorderDim
     div.BorderSizePixel = 0
     div.Parent = card
@@ -356,13 +383,13 @@ local function createCard(parent, title)
     local body = Instance.new("Frame")
     body.Name = "Body"
     body.BackgroundTransparency = 1
-    body.Position = UDim2.fromOffset(0, 32)
+    body.Position = UDim2.fromOffset(0, 36)
     body.Size = UDim2.new(1, 0, 0, 0)
     body.AutomaticSize = Enum.AutomaticSize.Y
     body.Parent = card
 
     local list = Instance.new("UIListLayout")
-    list.Padding = UDim.new(0, 6)
+    list.Padding = UDim.new(0, 8)
     list.SortOrder = Enum.SortOrder.LayoutOrder
     list.Parent = body
 
@@ -371,36 +398,36 @@ end
 
 local function createToggle(parent, setting, defaultState)
     local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, 0, 0, 28)
+    row.Size = UDim2.new(1, 0, 0, 36)
     row.BackgroundTransparency = 1
     row.Parent = parent
 
     local lbl = Instance.new("TextLabel")
     lbl.BackgroundTransparency = 1
     lbl.Text = setting
-    lbl.Size = UDim2.new(1, -52, 1, 0)
-    lbl.TextSize = 11
-    lbl.TextColor3 = THEME.TextMuted
+    lbl.Size = UDim2.new(1, -60, 1, 0)
+    lbl.TextSize = 12
+    lbl.TextColor3 = THEME.Text
     lbl.Font = FONT
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = row
 
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.fromOffset(40, 20)
-    btn.Position = UDim2.new(1, -40, 0.5, -10)
+    btn.Size = UDim2.fromOffset(48, 24)
+    btn.Position = UDim2.new(1, -48, 0.5, -12)
     btn.BackgroundColor3 = defaultState and THEME.Accent or THEME.CardAlt
     btn.Text = ""
     btn.AutoButtonColor = false
     btn.Parent = row
-    corner(btn, 10)
+    corner(btn, 12)
     stroke(btn, defaultState and THEME.AccentBright or THEME.BorderDim, 1)
 
     local knob = Instance.new("Frame")
-    knob.Size = UDim2.fromOffset(14, 14)
-    knob.Position = defaultState and UDim2.new(1, -17, 0.5, -7) or UDim2.fromOffset(3, 3)
+    knob.Size = UDim2.fromOffset(18, 18)
+    knob.Position = defaultState and UDim2.new(1, -21, 0.5, -9) or UDim2.fromOffset(3, 3)
     knob.BackgroundColor3 = THEME.Text
     knob.Parent = btn
-    corner(knob, 7)
+    corner(knob, 9)
 
     local state = defaultState
     local function fire(v)
@@ -412,22 +439,11 @@ local function createToggle(parent, setting, defaultState)
     btn.MouseButton1Click:Connect(function()
         state = not state
         tween(btn, TweenInfo.new(0.14), { BackgroundColor3 = state and THEME.Accent or THEME.CardAlt })
-        tween(knob, TweenInfo.new(0.14), { Position = state and UDim2.new(1, -17, 0.5, -7) or UDim2.fromOffset(3, 3) })
+        tween(knob, TweenInfo.new(0.14), { Position = state and UDim2.new(1, -21, 0.5, -9) or UDim2.fromOffset(3, 3) })
         fire(state)
     end)
 
     if defaultState then task.defer(function() fire(true) end) end
-
-    table.insert(InteractiveElements, {
-        Frame = row,
-        Action = function()
-            state = not state
-            tween(btn, TweenInfo.new(0.14), { BackgroundColor3 = state and THEME.Accent or THEME.CardAlt })
-            tween(knob, TweenInfo.new(0.14), { Position = state and UDim2.new(1, -17, 0.5, -7) or UDim2.fromOffset(3, 3) })
-            fire(state)
-        end
-    })
-
     return row
 end
 
@@ -436,16 +452,16 @@ local function createSlider(parent, setting, min, max, default, step, suffix)
     suffix = suffix or ""
 
     local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, 0, 0, 42)
+    row.Size = UDim2.new(1, 0, 0, 48)
     row.BackgroundTransparency = 1
     row.Parent = parent
 
     local titleLbl = Instance.new("TextLabel")
     titleLbl.BackgroundTransparency = 1
     titleLbl.Text = setting
-    titleLbl.Size = UDim2.new(0.6, 0, 0, 16)
-    titleLbl.TextSize = 11
-    titleLbl.TextColor3 = THEME.TextMuted
+    titleLbl.Size = UDim2.new(0.6, 0, 0, 18)
+    titleLbl.TextSize = 12
+    titleLbl.TextColor3 = THEME.Text
     titleLbl.Font = FONT
     titleLbl.TextXAlignment = Enum.TextXAlignment.Left
     titleLbl.Parent = row
@@ -453,35 +469,35 @@ local function createSlider(parent, setting, min, max, default, step, suffix)
     local valLbl = Instance.new("TextLabel")
     valLbl.BackgroundTransparency = 1
     valLbl.Text = tostring(default) .. suffix
-    valLbl.Size = UDim2.new(0.4, 0, 0, 16)
+    valLbl.Size = UDim2.new(0.4, 0, 0, 18)
     valLbl.Position = UDim2.new(0.6, 0, 0, 0)
-    valLbl.TextSize = 11
+    valLbl.TextSize = 12
     valLbl.TextColor3 = THEME.AccentBright
     valLbl.Font = FONT_BOLD
     valLbl.TextXAlignment = Enum.TextXAlignment.Right
     valLbl.Parent = row
 
     local track = Instance.new("Frame")
-    track.Size = UDim2.new(1, 0, 0, 8)
-    track.Position = UDim2.fromOffset(0, 24)
+    track.Size = UDim2.new(1, 0, 0, 12)
+    track.Position = UDim2.fromOffset(0, 26)
     track.BackgroundColor3 = THEME.CardAlt
     track.Parent = row
-    corner(track, 4)
+    corner(track, 6)
     stroke(track, THEME.BorderDim, 1)
 
     local fill = Instance.new("Frame")
     fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
     fill.BackgroundColor3 = THEME.Accent
     fill.Parent = track
-    corner(fill, 4)
+    corner(fill, 6)
 
     local knob = Instance.new("Frame")
-    knob.Size = UDim2.fromOffset(14, 14)
+    knob.Size = UDim2.fromOffset(18, 18)
     knob.AnchorPoint = Vector2.new(0.5, 0.5)
     knob.Position = UDim2.new((default - min) / (max - min), 0, 0.5, 0)
     knob.BackgroundColor3 = THEME.Text
     knob.Parent = track
-    corner(knob, 7)
+    corner(knob, 9)
     stroke(knob, THEME.AccentBright, 1)
 
     local val = default
@@ -504,20 +520,20 @@ local function createSlider(parent, setting, min, max, default, step, suffix)
     end
 
     row.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
             update(input.Position)
         end
     end)
 
     UserInputService.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
             update(input.Position)
         end
     end)
 
     UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = false
         end
     end)
@@ -528,47 +544,33 @@ local function createSlider(parent, setting, min, max, default, step, suffix)
         end
     end)
 
-    table.insert(InteractiveElements, {
-        Frame = row,
-        Adjust = function(delta)
-            val = math.clamp(val + (delta * step), min, max)
-            local pct = (val - min) / (max - min)
-            fill.Size = UDim2.new(pct, 0, 1, 0)
-            knob.Position = UDim2.new(pct, 0, 0.5, 0)
-            valLbl.Text = tostring(val) .. suffix
-            if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-                task.spawn(_G.AtomwareEvents[setting], val)
-            end
-        end
-    })
-
     return row
 end
 
 local function createDropdown(parent, setting, options, default)
     local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, 0, 0, 50)
+    row.Size = UDim2.new(1, 0, 0, 56)
     row.BackgroundTransparency = 1
     row.Parent = parent
 
     local titleLbl = Instance.new("TextLabel")
     titleLbl.BackgroundTransparency = 1
     titleLbl.Text = setting
-    titleLbl.Size = UDim2.new(1, 0, 0, 16)
-    titleLbl.TextSize = 11
-    titleLbl.TextColor3 = THEME.TextMuted
+    titleLbl.Size = UDim2.new(1, 0, 0, 18)
+    titleLbl.TextSize = 12
+    titleLbl.TextColor3 = THEME.Text
     titleLbl.Font = FONT
     titleLbl.TextXAlignment = Enum.TextXAlignment.Left
     titleLbl.Parent = row
 
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 26)
-    btn.Position = UDim2.fromOffset(0, 20)
+    btn.Size = UDim2.new(1, 0, 0, 30)
+    btn.Position = UDim2.fromOffset(0, 22)
     btn.BackgroundColor3 = THEME.CardAlt
     btn.Text = "  " .. tostring(default or options[1])
-    btn.TextColor3 = THEME.Text
-    btn.TextSize = 11
-    btn.Font = FONT
+    btn.TextColor3 = THEME.AccentBright
+    btn.TextSize = 12
+    btn.Font = FONT_BOLD
     btn.TextXAlignment = Enum.TextXAlignment.Left
     btn.AutoButtonColor = false
     btn.Parent = row
@@ -578,25 +580,25 @@ local function createDropdown(parent, setting, options, default)
     local arrow = Instance.new("TextLabel")
     arrow.BackgroundTransparency = 1
     arrow.Text = "▼"
-    arrow.Size = UDim2.fromOffset(24, 26)
-    arrow.Position = UDim2.new(1, -24, 0, 0)
+    arrow.Size = UDim2.fromOffset(26, 30)
+    arrow.Position = UDim2.new(1, -26, 0, 0)
     arrow.TextColor3 = THEME.AccentBright
     arrow.TextSize = 10
     arrow.Parent = btn
 
     local dropFrame = Instance.new("Frame")
-    dropFrame.Size = UDim2.new(1, 0, 0, #options * 26 + 6)
+    dropFrame.Size = UDim2.new(1, 0, 0, #options * 32 + 8)
     dropFrame.Position = UDim2.new(0, 0, 1, 4)
     dropFrame.BackgroundColor3 = THEME.Header
     dropFrame.Visible = false
     dropFrame.ZIndex = 80
     dropFrame.Parent = btn
-    corner(dropFrame, 6)
+    corner(dropFrame, 8)
     stroke(dropFrame, THEME.Accent, 1)
     padding(dropFrame, 4, 4, 4, 4)
 
     local dropList = Instance.new("UIListLayout")
-    dropList.Padding = UDim.new(0, 2)
+    dropList.Padding = UDim.new(0, 3)
     dropList.Parent = dropFrame
 
     local selected = default or options[1]
@@ -612,11 +614,11 @@ local function createDropdown(parent, setting, options, default)
 
     for _, opt in ipairs(options) do
         local optBtn = Instance.new("TextButton")
-        optBtn.Size = UDim2.new(1, 0, 0, 24)
+        optBtn.Size = UDim2.new(1, 0, 0, 28)
         optBtn.BackgroundColor3 = THEME.Card
         optBtn.Text = "  " .. tostring(opt)
         optBtn.TextColor3 = (opt == selected) and THEME.AccentBright or THEME.TextMuted
-        optBtn.TextSize = 11
+        optBtn.TextSize = 12
         optBtn.Font = FONT
         optBtn.TextXAlignment = Enum.TextXAlignment.Left
         optBtn.ZIndex = 81
@@ -644,7 +646,6 @@ local function createDropdown(parent, setting, options, default)
         end
     end)
 
-    table.insert(InteractiveElements, { Frame = row, Action = toggle })
     return row
 end
 
@@ -652,23 +653,23 @@ local function createColorPicker(parent, setting, defaultColor)
     defaultColor = defaultColor or Color3.fromRGB(157, 48, 255)
 
     local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, 0, 0, 30)
+    row.Size = UDim2.new(1, 0, 0, 36)
     row.BackgroundTransparency = 1
     row.Parent = parent
 
     local lbl = Instance.new("TextLabel")
     lbl.BackgroundTransparency = 1
     lbl.Text = setting
-    lbl.Size = UDim2.new(1, -50, 1, 0)
-    lbl.TextSize = 11
-    lbl.TextColor3 = THEME.TextMuted
+    lbl.Size = UDim2.new(1, -60, 1, 0)
+    lbl.TextSize = 12
+    lbl.TextColor3 = THEME.Text
     lbl.Font = FONT
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = row
 
     local preview = Instance.new("TextButton")
-    preview.Size = UDim2.fromOffset(36, 20)
-    preview.Position = UDim2.new(1, -36, 0.5, -10)
+    preview.Size = UDim2.fromOffset(48, 24)
+    preview.Position = UDim2.new(1, -48, 0.5, -12)
     preview.BackgroundColor3 = defaultColor
     preview.Text = ""
     preview.AutoButtonColor = false
@@ -684,8 +685,8 @@ local function createColorPicker(parent, setting, defaultColor)
     }
 
     local popover = Instance.new("Frame")
-    popover.Size = UDim2.fromOffset(170, 70)
-    popover.Position = UDim2.new(1, -170, 1, 4)
+    popover.Size = UDim2.fromOffset(180, 80)
+    popover.Position = UDim2.new(1, -180, 1, 4)
     popover.BackgroundColor3 = THEME.Header
     popover.Visible = false
     popover.ZIndex = 90
@@ -695,7 +696,7 @@ local function createColorPicker(parent, setting, defaultColor)
     padding(popover, 6, 6, 6, 6)
 
     local grid = Instance.new("UIGridLayout")
-    grid.CellSize = UDim2.fromOffset(34, 26)
+    grid.CellSize = UDim2.fromOffset(38, 30)
     grid.CellPadding = UDim2.fromOffset(4, 4)
     grid.Parent = popover
 
@@ -722,74 +723,11 @@ local function createColorPicker(parent, setting, defaultColor)
         end)
     end
 
-    table.insert(InteractiveElements, {
-        Frame = row,
-        Action = function() open = not open popover.Visible = open end
-    })
-
-    return row
-end
-
-local function createKeybind(parent, setting, defaultKey)
-    local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, 0, 0, 30)
-    row.BackgroundTransparency = 1
-    row.Parent = parent
-
-    local lbl = Instance.new("TextLabel")
-    lbl.BackgroundTransparency = 1
-    lbl.Text = setting
-    lbl.Size = UDim2.new(1, -70, 1, 0)
-    lbl.TextSize = 11
-    lbl.TextColor3 = THEME.TextMuted
-    lbl.Font = FONT
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.Parent = row
-
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.fromOffset(60, 22)
-    btn.Position = UDim2.new(1, -60, 0.5, -11)
-    btn.BackgroundColor3 = THEME.CardAlt
-    btn.Text = defaultKey or "None"
-    btn.TextColor3 = THEME.AccentBright
-    btn.TextSize = 11
-    btn.Font = FONT_BOLD
-    btn.AutoButtonColor = false
-    btn.Parent = row
-    corner(btn, 6)
-    stroke(btn, THEME.BorderDim, 1)
-
-    local listening = false
-    btn.MouseButton1Click:Connect(function()
-        listening = true
-        btn.Text = "..."
-        btn.TextColor3 = THEME.Red
-    end)
-
-    UserInputService.InputBegan:Connect(function(input, gpe)
-        if listening then
-            if input.UserInputType == Enum.UserInputType.Keyboard or input.UserInputType == Enum.UserInputType.Gamepad1 then
-                local kName = input.KeyCode.Name
-                listening = false
-                btn.Text = kName
-                btn.TextColor3 = THEME.AccentBright
-                if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-                    task.spawn(_G.AtomwareEvents[setting], kName)
-                end
-            end
-        end
-    end)
-
-    table.insert(InteractiveElements, {
-        Frame = row,
-        Action = function() listening = true btn.Text = "..." btn.TextColor3 = THEME.Red end
-    })
-
     return row
 end
 
 --//==================================================
---// BUILD TABS & SECTIONS
+--// BUILD MOBILE TABS & SECTIONS
 --//==================================================
 
 local tabsData = {
@@ -800,25 +738,26 @@ local tabsData = {
     { Name = "Settings", Icon = "⚙️" }
 }
 
-for i, t in ipairs(tabsData) do
+for _, t in ipairs(tabsData) do
     local pName = t.Name
     createPage(pName)
 
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 36)
+    btn.Size = UDim2.fromOffset(92, 34)
     btn.BackgroundColor3 = THEME.Card
-    btn.Text = "  " .. t.Icon .. "  " .. pName
+    btn.Text = t.Icon .. " " .. pName
     btn.TextColor3 = THEME.TextMuted
     btn.TextSize = 12
     btn.Font = FONT_BOLD
-    btn.TextXAlignment = Enum.TextXAlignment.Left
     btn.AutoButtonColor = false
-    btn.Parent = Sidebar
+    btn.Parent = TabBar
     corner(btn, 6)
     stroke(btn, THEME.BorderDim, 1)
 
     TabButtons[pName] = btn
-    btn.MouseButton1Click:Connect(function() switchPage(pName) end)
+    btn.MouseButton1Click:Connect(function()
+        switchPage(pName)
+    end)
 end
 
 -- ---------------------------------------------------
@@ -835,7 +774,7 @@ createToggle(bPlayerESP, "Sleeper Check", false)
 createToggle(bPlayerESP, "Weapon Esp", false)
 createToggle(bPlayerESP, "Skeleton Esp", false)
 
-local _, bESPColors = createCard(pVisuals, "ESP Customization")
+local _, bESPColors = createCard(pVisuals, "ESP Colors")
 createColorPicker(bESPColors, "Box Color", Color3.fromRGB(255, 255, 255))
 createColorPicker(bESPColors, "Skeleton Color", Color3.fromRGB(255, 255, 255))
 createColorPicker(bESPColors, "Text Color", Color3.fromRGB(255, 255, 255))
@@ -876,15 +815,14 @@ createToggle(bVehicles, "Vehicle Distance Esp", false)
 -- ---------------------------------------------------
 local pCombat = Pages["Combat"]
 
-local _, bAimbot = createCard(pCombat, "Aimbot Settings")
+local _, bAimbot = createCard(pCombat, "Mobile Aimbot & Aimlock")
 createToggle(bAimbot, "Aimbot Enabled", false)
-createDropdown(bAimbot, "Aimbot Mode", { "Hold Aim Key", "Always On", "Tap / Toggle" }, "Hold Aim Key")
+createDropdown(bAimbot, "Aimbot Mode", { "Always On", "Tap / Toggle", "Hold Aim Button" }, "Always On")
 createToggle(bAimbot, "Show FOV Circle", true)
-createSlider(bAimbot, "Aimbot FOV", 10, 500, 120, 5, "px")
-createSlider(bAimbot, "Aimbot Smoothing", 0.01, 1, 0.15, 0.01, "")
+createSlider(bAimbot, "Aimbot FOV", 10, 500, 140, 5, "px")
+createSlider(bAimbot, "Aimbot Smoothing", 0.01, 1, 0.20, 0.01, "")
 createDropdown(bAimbot, "Aim Hit Part", { "Head", "UpperTorso", "HumanoidRootPart" }, "Head")
 createToggle(bAimbot, "Aimbot Team Check", true)
-createKeybind(bAimbot, "Aim Key", "MouseButton2")
 
 local _, bBigHead = createCard(pCombat, "Big Head Hitbox")
 createToggle(bBigHead, "Big Head", false)
@@ -925,23 +863,19 @@ createSlider(bLighting, "Saturation", 0, 100, 10, 1, "")
 -- ---------------------------------------------------
 local pPlayer = Pages["Player"]
 
-local _, bCam = createCard(pPlayer, "Camera & FOV")
-createKeybind(bCam, "Xray", "V")
-createKeybind(bCam, "Zoom", "X")
+local _, bCam = createCard(pPlayer, "Camera & Visual Mods")
 createSlider(bCam, "FOV Changer", 50, 120, 70, 1, "°")
+createToggle(bCam, "X-Ray Active", false)
 
 local _, bHitSounds = createCard(pPlayer, "Hit Sounds")
 createDropdown(bHitSounds, "Hit sound", { "Default", "Rust", "Gamesense", "Magic", "Firework", "Lazer", "Pop", "Zap" }, "Default")
 createSlider(bHitSounds, "Hit sound Volume", 0.1, 5, 1, 0.1, "")
 
-local _, bTrails = createCard(pPlayer, "Weapon & Bullet Trails")
-createColorPicker(bTrails, "Arrow Trailcolor", Color3.fromRGB(255, 255, 255))
-createSlider(bTrails, "Arrow Trail lifespan", 0.15, 20, 0.15, 0.1, "s")
+local _, bTrails = createCard(pPlayer, "Bullet & Arrow Trails")
 createToggle(bTrails, "Bullet Trail", false)
 createColorPicker(bTrails, "Bullet Trail Color", Color3.fromRGB(255, 255, 255))
 createSlider(bTrails, "Trail Thickness", 0.1, 1, 0.2, 0.1, "")
 createSlider(bTrails, "Bullet Trail Length", 1, 25, 10, 1, "")
-createSlider(bTrails, "Trail LifeTime", 0.01, 5, 0.1, 0.05, "s")
 
 local _, bChams = createCard(pPlayer, "Hand & Weapon Chams")
 createDropdown(bChams, "Hand Cham Material", { "Default", "ForceField", "Neon", "Asphalt" }, "Default")
@@ -949,97 +883,35 @@ createColorPicker(bChams, "Hand cham color", Color3.fromRGB(255, 255, 255))
 createDropdown(bChams, "Weapon Cham Material", { "Default", "ForceField", "Neon", "Asphalt" }, "Default")
 createColorPicker(bChams, "Weapon Cham Color", Color3.fromRGB(255, 255, 255))
 
-local _, bFreeCam = createCard(pPlayer, "Free Camera")
-createKeybind(bFreeCam, "Free Cam", "Z")
-createSlider(bFreeCam, "FreeCam Speed", 1, 500, 150, 5, "")
-
 -- ---------------------------------------------------
 -- TAB 5: SETTINGS
 -- ---------------------------------------------------
 local pSettings = Pages["Settings"]
 
-local _, bUISet = createCard(pSettings, "Menu Settings")
-createKeybind(bUISet, "Toggle Menu Key", "Insert")
+local _, bMobileSet = createCard(pSettings, "Mobile Controls")
+local infoLbl = Instance.new("TextLabel")
+infoLbl.BackgroundTransparency = 1
+infoLbl.Text = "• Tap 'A' button to Toggle UI\n• Tap '🎯' button to Toggle / Lock Aim\n• Drag floating buttons to reposition"
+infoLbl.Size = UDim2.new(1, 0, 0, 54)
+infoLbl.TextSize = 12
+infoLbl.TextColor3 = THEME.TextMuted
+infoLbl.Font = FONT
+infoLbl.TextXAlignment = Enum.TextXAlignment.Left
+infoLbl.Parent = bMobileSet
 
+local _, bClose = createCard(pSettings, "Manage UI")
 local destBtn = Instance.new("TextButton")
-destBtn.Size = UDim2.new(1, 0, 0, 36)
+destBtn.Size = UDim2.new(1, 0, 0, 38)
 destBtn.BackgroundColor3 = Color3.fromRGB(70, 20, 35)
 destBtn.Text = "Close Atomware UI"
 destBtn.TextColor3 = THEME.Red
-destBtn.TextSize = 12
+destBtn.TextSize = 13
 destBtn.Font = FONT_BOLD
-destBtn.Parent = bUISet
+destBtn.Parent = bClose
 corner(destBtn, 6)
 destBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
 
 switchPage("Visuals")
-
---//==================================================
---// XBOX CONTROLLER ENGINE
---//==================================================
-
-local focusedIndex = 1
-local cursorHighlight = Instance.new("UIStroke")
-cursorHighlight.Color = THEME.AccentBright
-cursorHighlight.Thickness = 2
-cursorHighlight.Enabled = false
-
-local function updateControllerNav()
-    local valid = {}
-    for _, item in ipairs(InteractiveElements) do
-        if item.Frame and item.Frame:IsDescendantOf(Pages[CurrentPageName]) and item.Frame.Visible then
-            table.insert(valid, item)
-        end
-    end
-    if #valid == 0 then return end
-    focusedIndex = math.clamp(focusedIndex, 1, #valid)
-    local cur = valid[focusedIndex]
-    if cur and cur.Frame then
-        cursorHighlight.Parent = cur.Frame
-        cursorHighlight.Enabled = true
-    end
-end
-
-UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-
-    if input.UserInputType == Enum.UserInputType.Gamepad1 then
-        if input.KeyCode == Enum.KeyCode.ButtonLB then
-            setUIVisible(not UIVisible)
-        elseif input.KeyCode == Enum.KeyCode.ButtonRB then
-            _G.FireEvent("ControllerAimToggle")
-        elseif input.KeyCode == Enum.KeyCode.DPadDown then
-            focusedIndex = focusedIndex + 1
-            updateControllerNav()
-        elseif input.KeyCode == Enum.KeyCode.DPadUp then
-            focusedIndex = math.max(1, focusedIndex - 1)
-            updateControllerNav()
-        elseif input.KeyCode == Enum.KeyCode.DPadRight then
-            local cIdx = 1
-            for idx, tab in ipairs(tabsData) do if tab.Name == CurrentPageName then cIdx = idx break end end
-            switchPage(tabsData[(cIdx % #tabsData) + 1].Name)
-            focusedIndex = 1
-            updateControllerNav()
-        elseif input.KeyCode == Enum.KeyCode.DPadLeft then
-            local cIdx = 1
-            for idx, tab in ipairs(tabsData) do if tab.Name == CurrentPageName then cIdx = idx break end end
-            switchPage(tabsData[(cIdx - 2) % #tabsData + 1].Name)
-            focusedIndex = 1
-            updateControllerNav()
-        elseif input.KeyCode == Enum.KeyCode.ButtonA then
-            local valid = {}
-            for _, item in ipairs(InteractiveElements) do
-                if item.Frame and item.Frame:IsDescendantOf(Pages[CurrentPageName]) then
-                    table.insert(valid, item)
-                end
-            end
-            local cur = valid[focusedIndex]
-            if cur and cur.Action then cur.Action() end
-        end
-    elseif input.KeyCode == Enum.KeyCode.Insert then
-        setUIVisible(not UIVisible)
-    end
-end)
 
 _G.AtomwareUILoaded = true
 print("Good to go")

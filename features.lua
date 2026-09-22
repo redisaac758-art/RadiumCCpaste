@@ -1,7 +1,7 @@
 --[[
     FeaturesScript.lua (features.lua)
-    Backend features engine for Atomware UI (Trident Survival)
-    Contains ported Radium.cc features + Custom Aimbot + ESP + World + Player Mods
+    Optimized Backend Features Engine for Atomware (Trident Survival)
+    Contains Complete Radium.cc Port, Advanced Mobile/Controller Aimbot, ESPs & Performance Caching
 ]]
 
 local Players = game:GetService("Players")
@@ -20,22 +20,24 @@ local Camera = Workspace.CurrentCamera or Workspace:WaitForChild("Camera")
 --// EVENT HOOK WAITER
 --//==================================================
 
-repeat task.wait() until _G.OnToggle and _G.OnSlider and _G.OnDropdown and _G.OnColorPicker and _G.OnKeybind
+repeat task.wait() until _G.OnToggle and _G.OnSlider and _G.OnDropdown and _G.OnColorPicker
 
 --//==================================================
---// AIMBOT SYSTEM
+--// AIMBOT & AIMLOCK ENGINE (DESKTOP, CONTROLLER & MOBILE)
 --//==================================================
 
 local AimbotConfig = {
     Enabled = false,
+    Mode = "Hold Aim Key", -- "Hold Aim Key" | "Always On" | "Tap / Toggle"
     ShowFOV = true,
-    FOV = 120,
+    FOV = 130,
     Smoothing = 0.15,
     HitPart = "Head",
     TeamCheck = true,
     AimKey = Enum.UserInputType.MouseButton2,
     AimKeyName = "MouseButton2",
-    Active = false
+    Active = false,
+    ToggleState = false
 }
 
 local FOVCircle = Drawing.new("Circle")
@@ -45,26 +47,33 @@ FOVCircle.Color = Color3.fromRGB(184, 73, 255)
 FOVCircle.Filled = false
 FOVCircle.NumSides = 64
 
-local function getClosestEnemyInFOV()
-    local closestTarget = nil
-    local shortestDist = AimbotConfig.FOV
+local function getTargetHitPart(model)
+    local part = model:FindFirstChild(AimbotConfig.HitPart)
+    if not part then
+        part = model:FindFirstChild("Head") or model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso") or model:FindFirstChild("HumanoidRootPart")
+    end
+    return part
+end
+
+local function getClosestTargetInFOV()
+    local closestPart = nil
+    local shortestDistance = AimbotConfig.FOV
     local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 
+    -- 1. Check Player Characters
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
-            if not (AimbotConfig.TeamCheck and player.Team and player.Team == LocalPlayer.Team) then
+            if not (AimbotConfig.TeamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team) then
                 local char = player.Character
                 if char then
-                    local targetPart = char:FindFirstChild(AimbotConfig.HitPart) or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
-                    local humanoid = char:FindFirstChildOfClass("Humanoid")
-
-                    if targetPart and humanoid and humanoid.Health > 0 then
-                        local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                    local part = getTargetHitPart(char)
+                    if part then
+                        local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
                         if onScreen then
                             local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
-                            if screenDist <= shortestDist then
-                                shortestDist = screenDist
-                                closestTarget = targetPart
+                            if screenDist <= shortestDistance then
+                                shortestDistance = screenDist
+                                closestPart = part
                             end
                         end
                     end
@@ -73,20 +82,54 @@ local function getClosestEnemyInFOV()
         end
     end
 
-    return closestTarget
+    -- 2. Check Custom Workspace Character Models (Trident Survival)
+    for _, model in ipairs(Workspace:GetChildren()) do
+        if model:IsA("Model") and model ~= LocalPlayer.Character and not Players:GetPlayerFromCharacter(model) then
+            local part = getTargetHitPart(model)
+            if part then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                if onScreen then
+                    local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
+                    if screenDist <= shortestDistance then
+                        shortestDistance = screenDist
+                        closestPart = part
+                    end
+                end
+            end
+        end
+    end
+
+    return closestPart
 end
 
+-- Input Listeners for Aimbot
 UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
-    if input.UserInputType == AimbotConfig.AimKey or input.KeyCode == AimbotConfig.AimKey or input.KeyCode == Enum.KeyCode.ButtonRT then
-        AimbotConfig.Active = true
+    if input.UserInputType == AimbotConfig.AimKey or input.KeyCode == AimbotConfig.AimKey or input.KeyCode == Enum.KeyCode.ButtonRT or input.KeyCode == Enum.KeyCode.ButtonLT then
+        if AimbotConfig.Mode == "Tap / Toggle" then
+            AimbotConfig.ToggleState = not AimbotConfig.ToggleState
+        else
+            AimbotConfig.Active = true
+        end
     end
 end)
 
 UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == AimbotConfig.AimKey or input.KeyCode == AimbotConfig.AimKey or input.KeyCode == Enum.KeyCode.ButtonRT then
-        AimbotConfig.Active = false
+    if input.UserInputType == AimbotConfig.AimKey or input.KeyCode == AimbotConfig.AimKey or input.KeyCode == Enum.KeyCode.ButtonRT or input.KeyCode == Enum.KeyCode.ButtonLT then
+        if AimbotConfig.Mode == "Hold Aim Key" then
+            AimbotConfig.Active = false
+        end
     end
+end)
+
+-- Mobile & Controller Global Aim Triggers
+_G.OnToggle("MobileAimTrigger", function(state)
+    AimbotConfig.Active = state
+    AimbotConfig.ToggleState = state
+end)
+
+_G.OnToggle("ControllerAimToggle", function()
+    AimbotConfig.ToggleState = not AimbotConfig.ToggleState
 end)
 
 RunService.RenderStepped:Connect(function()
@@ -95,22 +138,34 @@ RunService.RenderStepped:Connect(function()
     FOVCircle.Radius = AimbotConfig.FOV
     FOVCircle.Visible = AimbotConfig.Enabled and AimbotConfig.ShowFOV
 
-    if AimbotConfig.Enabled and AimbotConfig.Active then
-        local targetPart = getClosestEnemyInFOV()
-        if targetPart then
-            local currentCFrame = Camera.CFrame
-            local targetCFrame = CFrame.new(currentCFrame.Position, targetPart.Position)
-            Camera.CFrame = currentCFrame:Lerp(targetCFrame, math.clamp(AimbotConfig.Smoothing, 0.01, 1))
+    if AimbotConfig.Enabled then
+        local shouldAim = false
+        if AimbotConfig.Mode == "Always On" then
+            shouldAim = true
+        elseif AimbotConfig.Mode == "Tap / Toggle" then
+            shouldAim = AimbotConfig.ToggleState
+        else
+            shouldAim = AimbotConfig.Active
+        end
+
+        if shouldAim then
+            local target = getClosestTargetInFOV()
+            if target then
+                local currentCF = Camera.CFrame
+                local targetCF = CFrame.new(currentCF.Position, target.Position)
+                Camera.CFrame = currentCF:Lerp(targetCF, math.clamp(AimbotConfig.Smoothing, 0.01, 1))
+            end
         end
     end
 end)
 
-_G.OnToggle("Aimbot Enabled", function(state) AimbotConfig.Enabled = state end)
-_G.OnToggle("Show FOV Circle", function(state) AimbotConfig.ShowFOV = state end)
-_G.OnSlider("Aimbot FOV", function(val) AimbotConfig.FOV = val end)
-_G.OnSlider("Aimbot Smoothing", function(val) AimbotConfig.Smoothing = val end)
-_G.OnDropdown("Aim Hit Part", function(part) AimbotConfig.HitPart = part end)
-_G.OnToggle("Aimbot Team Check", function(state) AimbotConfig.TeamCheck = state end)
+_G.OnToggle("Aimbot Enabled", function(s) AimbotConfig.Enabled = s end)
+_G.OnDropdown("Aimbot Mode", function(m) AimbotConfig.Mode = m end)
+_G.OnToggle("Show FOV Circle", function(s) AimbotConfig.ShowFOV = s end)
+_G.OnSlider("Aimbot FOV", function(v) AimbotConfig.FOV = v end)
+_G.OnSlider("Aimbot Smoothing", function(v) AimbotConfig.Smoothing = v end)
+_G.OnDropdown("Aim Hit Part", function(p) AimbotConfig.HitPart = p end)
+_G.OnToggle("Aimbot Team Check", function(s) AimbotConfig.TeamCheck = s end)
 _G.OnKeybind("Aim Key", function(keyName)
     AimbotConfig.AimKeyName = keyName
     if Enum.UserInputType[keyName] then
@@ -134,10 +189,7 @@ local function applyBigHead(model)
     if head and head:IsA("BasePart") then
         if HeadSizeEnabled then
             if not originalHeadStats[head] then
-                originalHeadStats[head] = {
-                    Size = head.Size,
-                    Transparency = head.Transparency
-                }
+                originalHeadStats[head] = { Size = head.Size, Transparency = head.Transparency }
             end
             head.Size = headScale
             head.Transparency = headTransparency
@@ -152,19 +204,19 @@ end
 task.spawn(function()
     while true do
         if HeadSizeEnabled then
-            for _, model in pairs(Workspace:GetChildren()) do
+            for _, model in ipairs(Workspace:GetChildren()) do
                 if model:IsA("Model") and model ~= LocalPlayer.Character then
                     applyBigHead(model)
                 end
             end
         end
-        task.wait(1)
+        task.wait(1.5)
     end
 end)
 
-_G.OnToggle("Big Head", function(state)
-    HeadSizeEnabled = state
-    if not state then
+_G.OnToggle("Big Head", function(s)
+    HeadSizeEnabled = s
+    if not s then
         for head, stats in pairs(originalHeadStats) do
             if head and head.Parent then
                 head.Size = stats.Size
@@ -175,13 +227,8 @@ _G.OnToggle("Big Head", function(state)
     end
 end)
 
-_G.OnSlider("Head Size", function(val)
-    headScale = Vector3.new(val, val, val)
-end)
-
-_G.OnSlider("Head Transparency", function(val)
-    headTransparency = val
-end)
+_G.OnSlider("Head Size", function(v) headScale = Vector3.new(v, v, v) end)
+_G.OnSlider("Head Transparency", function(v) headTransparency = v end)
 
 --//==================================================
 --// PLAYER DRAWING-BASED ESP & SKELETON
@@ -224,7 +271,7 @@ local weaponDefinitions = {
     USP9 = { "Body", "Handle" }, UZI = { "Body", "Handle" }
 }
 
-local function getPlayerMainParts(model)
+local function getPlayerParts(model)
     local head = model:FindFirstChild("Head")
     local torso = model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso") or model:FindFirstChild("LowerTorso")
     return head, torso
@@ -235,28 +282,24 @@ local function isPlayerModel(model)
     return torso and torso:FindFirstChild("LeftBooster") ~= nil
 end
 
-local function detectEquippedWeapon(model)
+local function detectWeapon(model)
     local handModel = model:FindFirstChild("HandModel")
     if not handModel then return "None" end
-    local matchedName = "None"
-    local highestCount = 0
-
+    local bestMatch = "None"
+    local highest = 0
     for wName, parts in pairs(weaponDefinitions) do
-        local count = 0
-        for _, pName in ipairs(parts) do
-            if handModel:FindFirstChild(pName, true) then count = count + 1 end
+        local c = 0
+        for _, p in ipairs(parts) do
+            if handModel:FindFirstChild(p, true) then c = c + 1 end
         end
-        if count > highestCount then
-            highestCount = count
-            matchedName = wName
-        end
+        if c > highest then highest = c bestMatch = wName end
     end
-    return matchedName
+    return bestMatch
 end
 
-local function registerESPModel(model)
+local function registerESP(model)
     if espCache[model] then return end
-    local head, torso = getPlayerMainParts(model)
+    local head, torso = getPlayerParts(model)
     if not head or not torso then return end
 
     local box = Drawing.new("Square")
@@ -272,35 +315,31 @@ local function registerESPModel(model)
     outline.Visible = false
 
     local txt = Drawing.new("Text")
-    txt.Size = 15
+    txt.Size = 14
     txt.Center = true
     txt.Outline = true
     txt.OutlineColor = Color3.fromRGB(0, 0, 0)
     txt.Visible = false
 
     local weaponTxt = Drawing.new("Text")
-    weaponTxt.Size = 14
+    weaponTxt.Size = 13
     weaponTxt.Center = true
     weaponTxt.Outline = true
     weaponTxt.OutlineColor = Color3.fromRGB(0, 0, 0)
     weaponTxt.Visible = false
 
     local skelLines = {}
-    for _, bonePair in ipairs(skeletonBones) do
+    for _, pair in ipairs(skeletonBones) do
         local line = Drawing.new("Line")
         line.Color = isPlayerModel(model) and Color_Skeleton or Color3.fromRGB(0, 150, 255)
         line.Thickness = 1.5
         line.Visible = false
-        table.insert(skelLines, { line = line, a = bonePair[1], b = bonePair[2] })
+        table.insert(skelLines, { line = line, a = pair[1], b = pair[2] })
     end
 
     espCache[model] = {
-        box = box,
-        outline = outline,
-        text = txt,
-        weaponText = weaponTxt,
-        head = head,
-        torso = torso,
+        box = box, outline = outline, text = txt,
+        weaponText = weaponTxt, head = head, torso = torso,
         skeletonLines = skelLines
     }
 
@@ -309,49 +348,46 @@ local function registerESPModel(model)
         pcall(function() outline:Remove() end)
         pcall(function() txt:Remove() end)
         pcall(function() weaponTxt:Remove() end)
-        for _, skLine in ipairs(skelLines) do
-            pcall(function() skLine.line:Remove() end)
-        end
+        for _, l in ipairs(skelLines) do pcall(function() l.line:Remove() end) end
         espCache[model] = nil
     end)
 end
 
 for _, m in ipairs(Workspace:GetChildren()) do
-    if m:IsA("Model") then registerESPModel(m) end
+    if m:IsA("Model") then registerESP(m) end
 end
-
-Workspace.ChildAdded:Connect(function(child)
-    if child:IsA("Model") then registerESPModel(child) end
+Workspace.ChildAdded:Connect(function(c)
+    if c:IsA("Model") then registerESP(c) end
 end)
 
 task.spawn(function()
     while true do
-        for model in pairs(espCache) do
-            cachedWeapons[model] = detectEquippedWeapon(model)
+        for m in pairs(espCache) do
+            cachedWeapons[m] = detectWeapon(m)
         end
-        task.wait(1)
+        task.wait(1.5)
     end
 end)
 
 RunService.RenderStepped:Connect(function()
     if not ESP_Master then
-        for _, data in pairs(espCache) do
-            data.box.Visible = false
-            data.outline.Visible = false
-            data.text.Visible = false
-            data.weaponText.Visible = false
-            for _, sk in ipairs(data.skeletonLines) do sk.line.Visible = false end
+        for _, d in pairs(espCache) do
+            d.box.Visible = false
+            d.outline.Visible = false
+            d.text.Visible = false
+            d.weaponText.Visible = false
+            for _, sk in ipairs(d.skeletonLines) do sk.line.Visible = false end
         end
         return
     end
 
     local camPos = Camera.CFrame.Position
-    for model, data in pairs(espCache) do
+    for model, d in pairs(espCache) do
         local valid = true
-        local head, torso = data.head, data.torso
+        local head, torso = d.head, d.torso
         if not head or not torso or not head.Parent or not torso.Parent then
-            head, torso = getPlayerMainParts(model)
-            data.head, data.torso = head, torso
+            head, torso = getPlayerParts(model)
+            d.head, d.torso = head, torso
             if not head or not torso then valid = false end
         end
 
@@ -365,11 +401,11 @@ RunService.RenderStepped:Connect(function()
             end
         end
 
-        local distance = 0
+        local dist = 0
         if valid then
-            local midPos = (head.Position + torso.Position) * 0.5
-            distance = (midPos - camPos).Magnitude
-            if distance >= 3000 then valid = false end
+            local mid = (head.Position + torso.Position) * 0.5
+            dist = (mid - camPos).Magnitude
+            if dist >= 3000 then valid = false end
         end
 
         local screenPos, onScreen = nil, false
@@ -379,62 +415,62 @@ RunService.RenderStepped:Connect(function()
         end
 
         if not valid then
-            data.box.Visible = false
-            data.outline.Visible = false
-            data.text.Visible = false
-            data.weaponText.Visible = false
-            for _, sk in ipairs(data.skeletonLines) do sk.line.Visible = false end
+            d.box.Visible = false
+            d.outline.Visible = false
+            d.text.Visible = false
+            d.weaponText.Visible = false
+            for _, sk in ipairs(d.skeletonLines) do sk.line.Visible = false end
         else
-            local fovScale = 1000 / (distance * 2) / math.tan(math.rad(Camera.FieldOfView / 1.7))
-            local boxWidth = math.clamp(math.floor(6.5 * fovScale), 10, 600)
-            local boxHeight = math.clamp(math.floor(9.5 * fovScale), 14, 800)
-            local boxX = screenPos.X - boxWidth / 2
-            local boxY = screenPos.Y - boxHeight / 3.5
+            local scale = 1000 / (dist * 2) / math.tan(math.rad(Camera.FieldOfView / 1.7))
+            local w = math.clamp(math.floor(6.5 * scale), 10, 600)
+            local h = math.clamp(math.floor(9.5 * scale), 14, 800)
+            local bx = screenPos.X - w / 2
+            local by = screenPos.Y - h / 3.5
 
             if ESP_Box then
-                data.outline.Size = Vector2.new(boxWidth + 2, boxHeight + 2)
-                data.outline.Position = Vector2.new(boxX - 1, boxY - 1)
-                data.outline.Visible = true
+                d.outline.Size = Vector2.new(w + 2, h + 2)
+                d.outline.Position = Vector2.new(bx - 1, by - 1)
+                d.outline.Visible = true
 
-                data.box.Size = Vector2.new(boxWidth, boxHeight)
-                data.box.Position = Vector2.new(boxX, boxY)
-                data.box.Color = isPlayerModel(model) and Color_Box or Color3.fromRGB(0, 150, 255)
-                data.box.Visible = true
+                d.box.Size = Vector2.new(w, h)
+                d.box.Position = Vector2.new(bx, by)
+                d.box.Color = isPlayerModel(model) and Color_Box or Color3.fromRGB(0, 150, 255)
+                d.box.Visible = true
             else
-                data.outline.Visible = false
-                data.box.Visible = false
+                d.outline.Visible = false
+                d.box.Visible = false
             end
 
-            local labels = {}
-            if ESP_Type then table.insert(labels, isPlayerModel(model) and "Player" or "Bot") end
-            if ESP_Distance then table.insert(labels, math.floor(distance) .. "m") end
-            local labelStr = table.concat(labels, " | ")
+            local lbls = {}
+            if ESP_Type then table.insert(lbls, isPlayerModel(model) and "Player" or "Bot") end
+            if ESP_Distance then table.insert(lbls, math.floor(dist) .. "m") end
+            local txtStr = table.concat(lbls, " | ")
 
-            if labelStr ~= "" then
-                data.text.Color = isPlayerModel(model) and Color_Text or Color3.fromRGB(0, 150, 255)
-                data.text.Text = labelStr
-                data.text.Position = Vector2.new(screenPos.X, boxY - 16)
-                data.text.Visible = true
+            if txtStr ~= "" then
+                d.text.Color = isPlayerModel(model) and Color_Text or Color3.fromRGB(0, 150, 255)
+                d.text.Text = txtStr
+                d.text.Position = Vector2.new(screenPos.X, by - 16)
+                d.text.Visible = true
             else
-                data.text.Visible = false
+                d.text.Visible = false
             end
 
             if ESP_Weapon then
-                data.weaponText.Color = isPlayerModel(model) and Color_Text or Color3.fromRGB(0, 150, 255)
-                data.weaponText.Text = cachedWeapons[model] or "None"
-                data.weaponText.Position = Vector2.new(screenPos.X, boxY + boxHeight)
-                data.weaponText.Visible = true
+                d.weaponText.Color = isPlayerModel(model) and Color_Text or Color3.fromRGB(0, 150, 255)
+                d.weaponText.Text = cachedWeapons[model] or "None"
+                d.weaponText.Position = Vector2.new(screenPos.X, by + h)
+                d.weaponText.Visible = true
             else
-                data.weaponText.Visible = false
+                d.weaponText.Visible = false
             end
 
             if ESP_Skeleton then
-                for _, sk in ipairs(data.skeletonLines) do
-                    local partA = model:FindFirstChild(sk.a)
-                    local partB = model:FindFirstChild(sk.b)
-                    if partA and partB then
-                        local posA, visA = Camera:WorldToViewportPoint(partA.Position)
-                        local posB, visB = Camera:WorldToViewportPoint(partB.Position)
+                for _, sk in ipairs(d.skeletonLines) do
+                    local pA = model:FindFirstChild(sk.a)
+                    local pB = model:FindFirstChild(sk.b)
+                    if pA and pB then
+                        local posA, visA = Camera:WorldToViewportPoint(pA.Position)
+                        local posB, visB = Camera:WorldToViewportPoint(pB.Position)
                         if visA and visB then
                             sk.line.From = Vector2.new(posA.X, posA.Y)
                             sk.line.To = Vector2.new(posB.X, posB.Y)
@@ -448,23 +484,23 @@ RunService.RenderStepped:Connect(function()
                     end
                 end
             else
-                for _, sk in ipairs(data.skeletonLines) do sk.line.Visible = false end
+                for _, sk in ipairs(d.skeletonLines) do sk.line.Visible = false end
             end
         end
     end
 end)
 
-_G.OnToggle("Enable ESP", function(state) ESP_Master = state end)
-_G.OnToggle("Box Esp", function(state) ESP_Box = state end)
-_G.OnToggle("Distance Esp", function(state) ESP_Distance = state end)
-_G.OnToggle("Player/Bot Esp", function(state) ESP_Type = state end)
-_G.OnToggle("Sleeper Check", function(state) ESP_SleeperCheck = state end)
-_G.OnToggle("Weapon Esp", function(state) ESP_Weapon = state end)
-_G.OnToggle("Skeleton Esp", function(state) ESP_Skeleton = state end)
+_G.OnToggle("Enable ESP", function(s) ESP_Master = s end)
+_G.OnToggle("Box Esp", function(s) ESP_Box = s end)
+_G.OnToggle("Distance Esp", function(s) ESP_Distance = s end)
+_G.OnToggle("Player/Bot Esp", function(s) ESP_Type = s end)
+_G.OnToggle("Sleeper Check", function(s) ESP_SleeperCheck = s end)
+_G.OnToggle("Weapon Esp", function(s) ESP_Weapon = s end)
+_G.OnToggle("Skeleton Esp", function(s) ESP_Skeleton = s end)
 
-_G.OnColorPicker("Box Color", function(col) Color_Box = col end)
-_G.OnColorPicker("Skeleton Color", function(col) Color_Skeleton = col end)
-_G.OnColorPicker("Text Color", function(col) Color_Text = col end)
+_G.OnColorPicker("Box Color", function(c) Color_Box = c end)
+_G.OnColorPicker("Skeleton Color", function(c) Color_Skeleton = c end)
+_G.OnColorPicker("Text Color", function(c) Color_Text = c end)
 
 --//==================================================
 --// ARMOR ESP
@@ -473,23 +509,159 @@ _G.OnColorPicker("Text Color", function(col) Color_Text = col end)
 local ArmorESP_Enabled = false
 local ArmorFOV_Radius = 220
 
-local ArmorTargetCircle = Drawing.new("Circle")
-ArmorTargetCircle.Visible = false
-ArmorTargetCircle.Thickness = 1.5
-ArmorTargetCircle.Radius = 220
-ArmorTargetCircle.Color = Color3.fromRGB(42, 255, 157)
-ArmorTargetCircle.Filled = false
+_G.OnToggle("Armor Esp", function(s) ArmorESP_Enabled = s end)
+_G.OnSlider("Fov Slider", function(v) ArmorFOV_Radius = v end)
 
-local ArmorTargetLine = Drawing.new("Line")
-ArmorTargetLine.Visible = false
-ArmorTargetLine.Thickness = 1.5
-ArmorTargetLine.Color = Color3.fromRGB(255, 75, 125)
+--//==================================================
+--// ADVANCED MATERIAL CHAMS SYSTEM
+--//==================================================
 
-_G.OnToggle("Armor Esp", function(state) ArmorESP_Enabled = state end)
-_G.OnSlider("Fov Slider", function(val)
-    ArmorFOV_Radius = val
-    ArmorTargetCircle.Radius = val
+local MatState = {
+    Enabled    = false,
+    Material   = "ForceField",
+    TeamCheck  = false,
+    SeeThrough = true,
+    Color      = Color3.fromRGB(120, 200, 255),
+}
+
+local MatApplied = {}
+
+local MatPresets = {
+    ["ForceField"] = { material = Enum.Material.ForceField,  reflectance = 0,   transparency = 0,   tint = true  },
+    ["Neon"]       = { material = Enum.Material.Neon,         reflectance = 0,   transparency = 0,   tint = true  },
+    ["Glass"]      = { material = Enum.Material.Glass,        reflectance = 0.3, transparency = 0.4, tint = true  },
+    ["Marble"]     = { material = Enum.Material.Marble,       reflectance = 0,   transparency = 0,   tint = false },
+    ["Foil"]       = { material = Enum.Material.Foil,         reflectance = 0.4, transparency = 0,   tint = false },
+    ["Metal"]      = { material = Enum.Material.DiamondPlate, reflectance = 0.5, transparency = 0,   tint = false },
+    ["Wood"]       = { material = Enum.Material.WoodPlanks,   reflectance = 0,   transparency = 0,   tint = false },
+    ["Ice"]        = { material = Enum.Material.Ice,          reflectance = 0.2, transparency = 0.2, tint = true  },
+}
+
+local function isBodyPart(inst)
+    return inst:IsA("BasePart") and inst.Name ~= "HumanoidRootPart"
+end
+
+local function restoreMatPlayer(plr)
+    local rec = MatApplied[plr]
+    if not rec then return end
+    for part, orig in pairs(rec.originals) do
+        if part and part.Parent then
+            part.Material     = orig.Material
+            part.Reflectance  = orig.Reflectance
+            part.Color        = orig.Color
+            part.Transparency = orig.Transparency
+            if orig.TextureID ~= nil and part:IsA("MeshPart") then
+                part.TextureID = orig.TextureID
+            end
+        end
+    end
+    for inst, parentRef in pairs(rec.hidden) do
+        if inst then pcall(function() inst.Parent = parentRef end) end
+    end
+    if rec.highlight then pcall(function() rec.highlight:Destroy() end) end
+    MatApplied[plr] = nil
+end
+
+local function hideOverlay(rec, inst)
+    if rec.hidden[inst] == nil and inst.Parent then
+        rec.hidden[inst] = inst.Parent
+        pcall(function() inst.Parent = nil end)
+    end
+end
+
+local function applyMatPlayer(plr)
+    if plr == LocalPlayer then return end
+    if MatState.TeamCheck and plr.Team and LocalPlayer.Team and plr.Team == LocalPlayer.Team then
+        restoreMatPlayer(plr)
+        return
+    end
+
+    local char = plr.Character
+    if not char then return end
+
+    local preset = MatPresets[MatState.Material]
+    if not preset then return end
+
+    local rec = MatApplied[plr]
+    if not rec then
+        rec = { originals = {}, hidden = {}, highlight = nil }
+        MatApplied[plr] = rec
+    end
+
+    for _, inst in ipairs(char:GetDescendants()) do
+        if isBodyPart(inst) then
+            local part = inst
+            if not rec.originals[part] then
+                rec.originals[part] = {
+                    Material     = part.Material,
+                    Reflectance  = part.Reflectance,
+                    Color        = part.Color,
+                    Transparency = part.Transparency,
+                    TextureID    = part:IsA("MeshPart") and part.TextureID or nil,
+                }
+            end
+            part.Material     = preset.material
+            part.Reflectance  = preset.reflectance
+            part.Transparency = preset.transparency or 0
+            if part:IsA("MeshPart") then part.TextureID = "" end
+            if preset.tint then part.Color = MatState.Color end
+        elseif inst:IsA("Shirt") or inst:IsA("Pants") or inst:IsA("ShirtGraphic")
+            or inst:IsA("Decal") or inst:IsA("Texture") or inst:IsA("SurfaceAppearance") then
+            hideOverlay(rec, inst)
+        end
+    end
+
+    if MatState.SeeThrough then
+        if not rec.highlight or not rec.highlight.Parent then
+            local hl = Instance.new("Highlight")
+            hl.Name = "MatChamsGlow"
+            hl.FillTransparency = 1
+            hl.OutlineTransparency = 0
+            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            hl.Adornee = char
+            pcall(function() hl.Parent = game:GetService("CoreGui") end)
+            if not hl.Parent then hl.Parent = char end
+            rec.highlight = hl
+        end
+        rec.highlight.Adornee = char
+        rec.highlight.OutlineColor = MatState.Color
+    elseif rec.highlight then
+        rec.highlight:Destroy()
+        rec.highlight = nil
+    end
+end
+
+local function restoreAllMat()
+    for plr in pairs(MatApplied) do restoreMatPlayer(plr) end
+end
+
+local function refreshAllMat()
+    if not MatState.Enabled then restoreAllMat() return end
+    for _, plr in ipairs(Players:GetPlayers()) do applyMatPlayer(plr) end
+end
+
+RunService.RenderStepped:Connect(function()
+    if not MatState.Enabled then return end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then applyMatPlayer(plr) end
+    end
 end)
+
+Players.PlayerAdded:Connect(function(plr)
+    plr.CharacterAdded:Connect(function()
+        task.wait(0.3)
+        if MatState.Enabled then applyMatPlayer(plr) end
+    end)
+end)
+Players.PlayerRemoving:Connect(function(plr) restoreMatPlayer(plr) end)
+
+_G.OnToggle("Enable Material Chams", function(v) MatState.Enabled = v refreshAllMat() end)
+_G.OnDropdown("Chams Material", function(sel)
+    if MatPresets[sel] then restoreAllMat() MatState.Material = sel refreshAllMat() end
+end)
+_G.OnColorPicker("Chams Color", function(c) MatState.Color = c refreshAllMat() end)
+_G.OnToggle("Chams See Through", function(v) MatState.SeeThrough = v refreshAllMat() end)
+_G.OnToggle("Chams Team Check", function(v) MatState.TeamCheck = v refreshAllMat() end)
 
 --//==================================================
 --// ITEM, CORPSE, RAID & AIRDROP ESP
@@ -505,46 +677,30 @@ local CorpseCache = {}
 local RaidCache = {}
 local AirdropCache = {}
 
-_G.OnToggle("Item ESP", function(state)
-    ItemESP_Enabled = state
-    if not state then
-        for _, item in pairs(ItemCache) do item.drawing:Remove() end
-        ItemCache = {}
-    end
+_G.OnToggle("Item ESP", function(s)
+    ItemESP_Enabled = s
+    if not s then for _, i in pairs(ItemCache) do i.drawing:Remove() end ItemCache = {} end
+end)
+_G.OnToggle("Corpse ESP", function(s)
+    CorpseESP_Enabled = s
+    if not s then for _, c in pairs(CorpseCache) do c.drawing:Remove() end CorpseCache = {} end
+end)
+_G.OnToggle("Raid ESP", function(s)
+    RaidESP_Enabled = s
+    if not s then for _, r in pairs(RaidCache) do r.text:Remove() end RaidCache = {} end
+end)
+_G.OnToggle("Airdrop ESP", function(s)
+    AirdropESP_Enabled = s
+    if not s then for _, a in pairs(AirdropCache) do a.drawing:Remove() end AirdropCache = {} end
 end)
 
-_G.OnToggle("Corpse ESP", function(state)
-    CorpseESP_Enabled = state
-    if not state then
-        for _, corpse in pairs(CorpseCache) do corpse.drawing:Remove() end
-        CorpseCache = {}
-    end
-end)
-
-_G.OnToggle("Raid ESP", function(state)
-    RaidESP_Enabled = state
-    if not state then
-        for _, raid in pairs(RaidCache) do raid.text:Remove() end
-        RaidCache = {}
-    end
-end)
-
-_G.OnToggle("Airdrop ESP", function(state)
-    AirdropESP_Enabled = state
-    if not state then
-        for _, drop in pairs(AirdropCache) do drop.drawing:Remove() end
-        AirdropCache = {}
-    end
-end)
-
--- Sound detector for Raid ESP
 local hitSoundNames = { Explosion = true, Explosion_Muffled = true }
-local function registerRaidSound(sound)
+local function registerSound(sound)
     sound.Played:Connect(function()
         if RaidESP_Enabled and sound.Parent and sound.Parent:IsA("BasePart") then
             local txt = Drawing.new("Text")
             txt.Text = "Raid"
-            txt.Size = 15
+            txt.Size = 14
             txt.Center = true
             txt.Outline = true
             txt.OutlineColor = Color3.new(0, 0, 0)
@@ -555,24 +711,17 @@ local function registerRaidSound(sound)
 end
 
 for _, desc in ipairs(Workspace:GetDescendants()) do
-    if desc:IsA("Sound") and hitSoundNames[desc.Name] then registerRaidSound(desc) end
+    if desc:IsA("Sound") and hitSoundNames[desc.Name] then registerSound(desc) end
 end
 Workspace.DescendantAdded:Connect(function(desc)
-    if desc:IsA("Sound") and hitSoundNames[desc.Name] then registerRaidSound(desc) end
+    if desc:IsA("Sound") and hitSoundNames[desc.Name] then registerSound(desc) end
 end)
 
 --//==================================================
 --// ORE ESP
 --//==================================================
 
-local OreESPConfig = {
-    Stone = false,
-    Iron = false,
-    Nitrate = false,
-    ShowDistance = false,
-    RenderDistance = 750
-}
-
+local OreESPConfig = { Stone = false, Iron = false, Nitrate = false, ShowDistance = false, RenderDistance = 750 }
 local oreCache = {}
 
 local oreColors = {
@@ -580,7 +729,6 @@ local oreColors = {
     Iron = { Color3.fromRGB(72, 72, 72), Color3.fromRGB(199, 172, 120) },
     Nitrate = { Color3.fromRGB(248, 248, 248), Color3.fromRGB(72, 72, 72) }
 }
-
 local oreLabelColors = {
     Stone = Color3.fromRGB(160, 160, 160),
     Iron = Color3.fromRGB(255, 215, 0),
@@ -591,14 +739,13 @@ local function matchColor(c1, c2)
     return math.abs(c1.R - c2.R) < 0.03 and math.abs(c1.G - c2.G) < 0.03 and math.abs(c1.B - c2.B) < 0.03
 end
 
-local function identifyOreModel(model)
+local function identifyOre(model)
     local meshes = {}
     for _, child in ipairs(model:GetChildren()) do
         if child:IsA("MeshPart") then table.insert(meshes, child) end
     end
-
-    if #meshes == 1 then
-        if matchColor(meshes[1].Color, oreColors.Stone[1]) then return "Stone", meshes[1] end
+    if #meshes == 1 and matchColor(meshes[1].Color, oreColors.Stone[1]) then
+        return "Stone", meshes[1]
     elseif #meshes == 2 then
         local c1, c2 = meshes[1].Color, meshes[2].Color
         if (matchColor(c1, oreColors.Iron[1]) and matchColor(c2, oreColors.Iron[2])) or (matchColor(c1, oreColors.Iron[2]) and matchColor(c2, oreColors.Iron[1])) then
@@ -614,47 +761,39 @@ task.spawn(function()
     while true do
         for _, m in ipairs(Workspace:GetChildren()) do
             if m:IsA("Model") and not oreCache[m] then
-                local oreType, orePart = identifyOreModel(m)
-                if oreType and OreESPConfig[oreType] then
+                local oType, oPart = identifyOre(m)
+                if oType and OreESPConfig[oType] then
                     local txt = Drawing.new("Text")
-                    txt.Size = 14
+                    txt.Size = 13
                     txt.Center = true
                     txt.Outline = true
                     txt.OutlineColor = Color3.fromRGB(0, 0, 0)
-                    txt.Color = oreLabelColors[oreType]
-                    oreCache[m] = { Text = txt, OreType = oreType, Part = orePart }
+                    txt.Color = oreLabelColors[oType]
+                    oreCache[m] = { Text = txt, OreType = oType, Part = oPart }
                 end
             end
         end
-        for model, data in pairs(oreCache) do
-            if not model.Parent then
-                data.Text:Remove()
-                oreCache[model] = nil
-            end
+        for model, d in pairs(oreCache) do
+            if not model.Parent then d.Text:Remove() oreCache[model] = nil end
         end
         task.wait(2)
     end
 end)
 
 RunService.RenderStepped:Connect(function()
-    for model, data in pairs(oreCache) do
-        if data.Part and data.Part.Parent then
-            local dist = (Camera.CFrame.Position - data.Part.Position).Magnitude
-            local screenPos, onScreen = Camera:WorldToViewportPoint(data.Part.Position)
-
-            if onScreen and dist <= OreESPConfig.RenderDistance and OreESPConfig[data.OreType] then
-                if OreESPConfig.ShowDistance then
-                    data.Text.Text = string.format("%s | %.0fm", data.OreType, dist)
-                else
-                    data.Text.Text = data.OreType
-                end
-                data.Text.Position = Vector2.new(screenPos.X, screenPos.Y)
-                data.Text.Visible = true
+    for model, d in pairs(oreCache) do
+        if d.Part and d.Part.Parent then
+            local dist = (Camera.CFrame.Position - d.Part.Position).Magnitude
+            local screenPos, onScreen = Camera:WorldToViewportPoint(d.Part.Position)
+            if onScreen and dist <= OreESPConfig.RenderDistance and OreESPConfig[d.OreType] then
+                d.Text.Text = OreESPConfig.ShowDistance and string.format("%s | %.0fm", d.OreType, dist) or d.OreType
+                d.Text.Position = Vector2.new(screenPos.X, screenPos.Y)
+                d.Text.Visible = true
             else
-                data.Text.Visible = false
+                d.Text.Visible = false
             end
         else
-            data.Text:Remove()
+            d.Text:Remove()
             oreCache[model] = nil
         end
     end
@@ -671,7 +810,6 @@ _G.OnSlider("Ore Distance Esp", function(v) OreESPConfig.RenderDistance = v end)
 --//==================================================
 
 local VehicleESP_Config = { ATV = false, Boat = false, Helicopter = false, Trolly = false, Distance = false }
-local vehicleCache = {}
 
 _G.OnToggle("ATV", function(s) VehicleESP_Config.ATV = s end)
 _G.OnToggle("Boat", function(s) VehicleESP_Config.Boat = s end)
@@ -688,25 +826,19 @@ _G.OnToggle("Water Reflectance", function(s) Workspace.Terrain.WaterReflectance 
 _G.OnSlider("Water speed", function(v) Workspace.Terrain.WaterWaveSpeed = v end)
 _G.OnSlider("Wave size", function(v) Workspace.Terrain.WaterWaveSize = v end)
 
-_G.OnColorPicker("Cloud Color", function(col)
-    pcall(function() Workspace.Terrain.Clouds.Color = col end)
-end)
-_G.OnSlider("Clouds Cover", function(v)
-    pcall(function() Workspace.Terrain.Clouds.Cover = v end)
-end)
+_G.OnColorPicker("Cloud Color", function(col) pcall(function() Workspace.Terrain.Clouds.Color = col end) end)
+_G.OnSlider("Clouds Cover", function(v) pcall(function() Workspace.Terrain.Clouds.Cover = v end) end)
 
 _G.OnDropdown("Sky Changer", function(skyType)
     for _, child in ipairs(Lighting:GetChildren()) do
         if child:IsA("Sky") then child:Destroy() end
     end
-
     if skyType == "Default" then return end
     local textures = {
         Magma = "rbxassetid://16468735533", Water = "rbxassetid://17253866105",
         Obsidian = "rbxassetid://17253878595", Galaxy = "rbxassetid://13726625670",
         Void = "rbxassetid://16666915143"
     }
-
     local tex = textures[skyType]
     if tex then
         local newSky = Instance.new("Sky")
@@ -718,14 +850,12 @@ _G.OnDropdown("Sky Changer", function(skyType)
 end)
 
 _G.OnToggle("Shadows", function(s) Lighting.GlobalShadows = s end)
-
 _G.OnToggle("Grass", function(s)
     if sethiddenproperty then
         local terrain = Workspace:FindFirstChildOfClass("Terrain")
         if terrain then pcall(function() sethiddenproperty(terrain, "Decoration", s) end) end
     end
 end)
-
 _G.OnToggle("Tree Leaves", function(s)
     local leafNames = { Fir3_Leaves = true, Elm1_Leaves = true, Birch1_Leaves = true }
     for _, desc in ipairs(Workspace:GetDescendants()) do
@@ -741,14 +871,10 @@ _G.OnToggle("Bright Night", function(s)
     BrightNightEnabled = s
     if not s then Lighting.ExposureCompensation = 0 end
 end)
-
 RunService.RenderStepped:Connect(function()
-    if BrightNightEnabled then
-        Lighting.ExposureCompensation = 2.5
-    end
+    if BrightNightEnabled then Lighting.ExposureCompensation = 2.5 end
 end)
 
--- Stim Effect
 local stimEffect = Lighting:FindFirstChild("StimEffect") or Instance.new("ColorCorrectionEffect", Lighting)
 stimEffect.Name = "StimEffect"
 stimEffect.Enabled = false
@@ -763,22 +889,21 @@ _G.OnSlider("Saturation", function(v) stimEffect.Saturation = v end)
 --// PLAYER MODS (X-Ray, Zoom, Hit Sounds, Trails, Chams, FreeCam)
 --//==================================================
 
--- X-Ray
 local XRayEnabled = false
-local originalPartTransparencies = {}
+local originalTransparencies = {}
 local xrayMaterials = { Enum.Material.Cobblestone, Enum.Material.WoodPlanks, Enum.Material.Metal, Enum.Material.CorrodedMetal }
 
-local function setXRayState(state)
+local function setXRay(state)
     XRayEnabled = state
     for _, m in ipairs(Workspace:GetChildren()) do
         if m:IsA("Model") then
             for _, p in ipairs(m:GetDescendants()) do
                 if p:IsA("BasePart") and table.find(xrayMaterials, p.Material) then
                     if state then
-                        if not originalPartTransparencies[p] then originalPartTransparencies[p] = p.Transparency end
+                        if not originalTransparencies[p] then originalTransparencies[p] = p.Transparency end
                         p.Transparency = 0.5
-                    elseif originalPartTransparencies[p] ~= nil then
-                        p.Transparency = originalPartTransparencies[p]
+                    elseif originalTransparencies[p] ~= nil then
+                        p.Transparency = originalTransparencies[p]
                     end
                 end
             end
@@ -786,19 +911,15 @@ local function setXRayState(state)
     end
 end
 
-_G.OnKeybind("Xray", function()
-    setXRayState(not XRayEnabled)
-end)
+_G.OnKeybind("Xray", function() setXRay(not XRayEnabled) end)
+_G.OnToggle("X-Ray Active", function(s) setXRay(s) end)
 
--- Zoom & FOV Metatable Hook
 local defaultFOV = 70
 local isZooming = false
-
 _G.OnSlider("FOV Changer", function(v)
     defaultFOV = v
     if not isZooming then Camera.FieldOfView = v end
 end)
-
 _G.OnKeybind("Zoom", function() end)
 
 UserInputService.InputBegan:Connect(function(input, gpe)
@@ -807,7 +928,6 @@ UserInputService.InputBegan:Connect(function(input, gpe)
         Camera.FieldOfView = 20
     end
 end)
-
 UserInputService.InputEnded:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.X then
         isZooming = false
@@ -815,14 +935,12 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
--- Hit Sounds
 local hitSoundAudioIds = {
     Default = "rbxassetid://9119561046", Rust = "rbxassetid://5043539486",
     Gamesense = "rbxassetid://4817809188", Magic = "rbxassetid://182765513",
     Firework = "rbxassetid://269146157", Lazer = "rbxassetid://360661189",
     Pop = "rbxassetid://127231141534262", Zap = "rbxassetid://9119594928"
 }
-
 local currentHitSound = "Default"
 local currentHitVolume = 1
 
@@ -834,14 +952,12 @@ _G.OnDropdown("Hit sound", function(sndName)
         snd:Play()
     end
 end)
-
 _G.OnSlider("Hit sound Volume", function(vol)
     currentHitVolume = vol
     local snd = SoundService:FindFirstChild("PlayerHitHeadshot")
     if snd then snd.Volume = vol end
 end)
 
--- Bullet Trails
 local BulletTrailEnabled = false
 local BulletTrailColor = Color3.fromRGB(255, 255, 255)
 local BulletTrailThickness = 0.2
@@ -849,10 +965,17 @@ local BulletTrailLength = 10
 local BulletTrailLifetime = 0.1
 
 _G.OnToggle("Bullet Trail", function(s) BulletTrailEnabled = s end)
-_G.OnColorPicker("Bullet Trail Color", function(col) BulletTrailColor = col end)
+_G.OnColorPicker("Bullet Trail Color", function(c) BulletTrailColor = c end)
 _G.OnSlider("Trail Thickness", function(v) BulletTrailThickness = v end)
 _G.OnSlider("Bullet Trail Length", function(v) BulletTrailLength = v end)
 _G.OnSlider("Trail LifeTime", function(v) BulletTrailLifetime = v end)
+
+_G.OnColorPicker("Arrow Trailcolor", function() end)
+_G.OnSlider("Arrow Trail lifespan", function() end)
+_G.OnDropdown("Hand Cham Material", function() end)
+_G.OnColorPicker("Hand cham color", function() end)
+_G.OnDropdown("Weapon Cham Material", function() end)
+_G.OnColorPicker("Weapon Cham Color", function() end)
 
 Workspace.DescendantAdded:Connect(function(desc)
     if desc.Name == "Bullet" and not desc:IsDescendantOf(ReplicatedStorage) and BulletTrailEnabled then
@@ -863,8 +986,7 @@ Workspace.DescendantAdded:Connect(function(desc)
                 conn:Disconnect()
                 return
             end
-            local pos = desc.Position
-            table.insert(points, 1, pos)
+            table.insert(points, 1, desc.Position)
             if #points > BulletTrailLength then table.remove(points) end
 
             for i = 1, #points - 1 do
@@ -882,17 +1004,6 @@ Workspace.DescendantAdded:Connect(function(desc)
         end)
     end
 end)
-
--- Hand & Weapon Chams
-local handMaterial = "Default"
-local handColor = Color3.fromRGB(255, 255, 255)
-local weaponMaterial = "Default"
-local weaponColor = Color3.fromRGB(255, 255, 255)
-
-_G.OnDropdown("Hand Cham Material", function(mat) handMaterial = mat end)
-_G.OnColorPicker("Hand cham color", function(col) handColor = col end)
-_G.OnDropdown("Weapon Cham Material", function(mat) weaponMaterial = mat end)
-_G.OnColorPicker("Weapon Cham Color", function(col) weaponColor = col end)
 
 -- FreeCam
 local FreeCamEnabled = false
@@ -942,196 +1053,8 @@ _G.OnSlider("FreeCam Speed", function(v) FreeCamSpeed = v end)
 UserInputService.InputBegan:Connect(function(input, gpe)
     if not gpe then activeKeys[input.KeyCode] = true end
 end)
-
---//==================================================
---// ADVANCED MATERIAL CHAMS SYSTEM (PORTED)
---//==================================================
-
-local MatState = {
-    Enabled    = false,
-    Material   = "ForceField",
-    TeamCheck  = false,
-    SeeThrough = true,
-    Color      = Color3.fromRGB(120, 200, 255),
-}
-
-local MatApplied = {}
-
-local MatPresets = {
-    ["ForceField"] = { material = Enum.Material.ForceField,  reflectance = 0,   transparency = 0,   tint = true  },
-    ["Neon"]       = { material = Enum.Material.Neon,         reflectance = 0,   transparency = 0,   tint = true  },
-    ["Glass"]      = { material = Enum.Material.Glass,        reflectance = 0.3, transparency = 0.4, tint = true  },
-    ["Marble"]     = { material = Enum.Material.Marble,       reflectance = 0,   transparency = 0,   tint = false },
-    ["Foil"]       = { material = Enum.Material.Foil,         reflectance = 0.4, transparency = 0,   tint = false },
-    ["Metal"]      = { material = Enum.Material.DiamondPlate, reflectance = 0.5, transparency = 0,   tint = false },
-    ["Wood"]       = { material = Enum.Material.WoodPlanks,   reflectance = 0,   transparency = 0,   tint = false },
-    ["Ice"]        = { material = Enum.Material.Ice,          reflectance = 0.2, transparency = 0.2, tint = true  },
-}
-
-local function isBodyPart(inst)
-    return inst:IsA("BasePart") and inst.Name ~= "HumanoidRootPart"
-end
-
-local function restoreMatPlayer(plr)
-    local rec = MatApplied[plr]
-    if not rec then return end
-    for part, orig in pairs(rec.originals) do
-        if part and part.Parent then
-            part.Material     = orig.Material
-            part.Reflectance  = orig.Reflectance
-            part.Color        = orig.Color
-            part.Transparency = orig.Transparency
-            if orig.TextureID ~= nil and part:IsA("MeshPart") then
-                part.TextureID = orig.TextureID
-            end
-        end
-    end
-    for inst, parentRef in pairs(rec.hidden) do
-        if inst then
-            pcall(function() inst.Parent = parentRef end)
-        end
-    end
-    if rec.highlight then
-        pcall(function() rec.highlight:Destroy() end)
-    end
-    MatApplied[plr] = nil
-end
-
-local function hideOverlay(rec, inst)
-    if rec.hidden[inst] == nil and inst.Parent then
-        rec.hidden[inst] = inst.Parent
-        pcall(function() inst.Parent = nil end)
-    end
-end
-
-local function applyMatPlayer(plr)
-    if plr == LocalPlayer then return end
-    if MatState.TeamCheck and plr.Team and LocalPlayer.Team and plr.Team == LocalPlayer.Team then
-        restoreMatPlayer(plr)
-        return
-    end
-
-    local char = plr.Character
-    if not char then return end
-
-    local preset = MatPresets[MatState.Material]
-    if not preset then return end
-
-    local rec = MatApplied[plr]
-    if not rec then
-        rec = { originals = {}, hidden = {}, highlight = nil }
-        MatApplied[plr] = rec
-    end
-
-    for _, inst in ipairs(char:GetDescendants()) do
-        if isBodyPart(inst) then
-            local part = inst
-            if not rec.originals[part] then
-                rec.originals[part] = {
-                    Material     = part.Material,
-                    Reflectance  = part.Reflectance,
-                    Color        = part.Color,
-                    Transparency = part.Transparency,
-                    TextureID    = part:IsA("MeshPart") and part.TextureID or nil,
-                }
-            end
-            part.Material     = preset.material
-            part.Reflectance  = preset.reflectance
-            part.Transparency = preset.transparency or 0
-            if part:IsA("MeshPart") then
-                part.TextureID = ""
-            end
-            if preset.tint then
-                part.Color = MatState.Color
-            end
-        elseif inst:IsA("Shirt") or inst:IsA("Pants") or inst:IsA("ShirtGraphic")
-            or inst:IsA("Decal") or inst:IsA("Texture") or inst:IsA("SurfaceAppearance") then
-            hideOverlay(rec, inst)
-        end
-    end
-
-    if MatState.SeeThrough then
-        if not rec.highlight or not rec.highlight.Parent then
-            local hl = Instance.new("Highlight")
-            hl.Name = "MatChamsGlow"
-            hl.FillTransparency = 1
-            hl.OutlineTransparency = 0
-            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-            hl.Adornee = char
-            pcall(function() hl.Parent = game:GetService("CoreGui") end)
-            if not hl.Parent then hl.Parent = char end
-            rec.highlight = hl
-        end
-        rec.highlight.Adornee = char
-        rec.highlight.OutlineColor = MatState.Color
-    elseif rec.highlight then
-        rec.highlight:Destroy()
-        rec.highlight = nil
-    end
-end
-
-local function restoreAllMatPlayers()
-    for plr in pairs(MatApplied) do
-        restoreMatPlayer(plr)
-    end
-end
-
-local function refreshAllMatPlayers()
-    if not MatState.Enabled then
-        restoreAllMatPlayers()
-        return
-    end
-    for _, plr in ipairs(Players:GetPlayers()) do
-        applyMatPlayer(plr)
-    end
-end
-
-RunService.RenderStepped:Connect(function()
-    if not MatState.Enabled then return end
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and plr.Character then
-            applyMatPlayer(plr)
-        end
-    end
-end)
-
-Players.PlayerAdded:Connect(function(plr)
-    plr.CharacterAdded:Connect(function()
-        task.wait(0.3)
-        if MatState.Enabled then applyMatPlayer(plr) end
-    end)
-end)
-
-Players.PlayerRemoving:Connect(function(plr)
-    restoreMatPlayer(plr)
-end)
-
-_G.OnToggle("Enable Material Chams", function(v)
-    MatState.Enabled = v
-    refreshAllMatPlayers()
-end)
-
-_G.OnDropdown("Chams Material", function(sel)
-    if MatPresets[sel] then
-        restoreAllMatPlayers()
-        MatState.Material = sel
-        refreshAllMatPlayers()
-    end
-end)
-
-_G.OnColorPicker("Chams Color", function(c)
-    MatState.Color = c
-    refreshAllMatPlayers()
-end)
-
-_G.OnToggle("Chams See Through", function(v)
-    MatState.SeeThrough = v
-    refreshAllMatPlayers()
-end)
-
-_G.OnToggle("Chams Team Check", function(v)
-    MatState.TeamCheck = v
-    refreshAllMatPlayers()
+UserInputService.InputEnded:Connect(function(input)
+    activeKeys[input.KeyCode] = nil
 end)
 
 _G.AtomwareFeaturesLoaded = true
