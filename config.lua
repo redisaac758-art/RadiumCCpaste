@@ -413,11 +413,12 @@ function Config:Unload(screenGui)
         end
     end
     _G.AtomwareForceHeadshots = false
-    for _, callback in ipairs(Config.Cleanup) do pcall(callback) end
     for _, connection in ipairs(Config.Connections) do pcall(function() connection:Disconnect() end) end
     Config.Connections = {}
     for _, thread in ipairs(Config.Tasks) do pcall(task.cancel, thread) end
     Config.Tasks = {}
+    for _, callback in ipairs(Config.Cleanup) do pcall(callback) end
+    Config.Cleanup = {}
     local cursorEnabled = Config.CursorWasEnabled
     if Config.CursorEnabledBeforeCustom ~= nil then
         cursorEnabled = Config.CursorEnabledBeforeCustom

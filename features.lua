@@ -23,6 +23,12 @@ local function trackTask(thread)
     if _G.AtomwareConfig then return _G.AtomwareConfig:TrackTask(thread) end
     return thread
 end
+local OwnedDrawings = {}
+local function newDrawing(kind)
+    local drawing = Drawing.new(kind)
+    table.insert(OwnedDrawings, drawing)
+    return drawing
+end
 local Camera = Workspace.CurrentCamera or Workspace:WaitForChild("Camera", 10)
 if not Camera then error("Atomware: CurrentCamera was unavailable after 10 seconds") end
 local InitialCameraFOV = Camera.FieldOfView
@@ -67,10 +73,11 @@ local AimbotConfig = {
     AimKey = Enum.UserInputType.MouseButton2,
     AimKeyName = "MouseButton2",
     Active = false,
-    ToggleState = false
+    ToggleState = false,
+    LockedTarget = nil
 }
 
-local FOVCircle = Drawing.new("Circle")
+local FOVCircle = newDrawing("Circle")
 FOVCircle.Visible = false
 FOVCircle.Thickness = 1.5
 FOVCircle.Color = Color3.fromRGB(184, 73, 255)
@@ -144,9 +151,11 @@ trackConnection(UserInputService.InputBegan:Connect(function(input, gpe)
 
     if AimbotConfig.Mode == "Hold Toggle" then
         AimbotConfig.ToggleState = not AimbotConfig.ToggleState
+        AimbotConfig.LockedTarget = AimbotConfig.ToggleState and getClosestTargetInFOV() or nil
     else
         -- "Controller Bind" and any other mode: hold-to-aim
         AimbotConfig.Active = true
+        AimbotConfig.LockedTarget = getClosestTargetInFOV()
     end
 end))
 
@@ -158,6 +167,7 @@ trackConnection(UserInputService.InputEnded:Connect(function(input)
     -- Only release aim on key-up for hold-style modes
     if AimbotConfig.Mode == "Controller Bind" then
         AimbotConfig.Active = false
+        AimbotConfig.LockedTarget = nil
     end
     -- "Hold Toggle" and "Always On" are unaffected by key release
 end))
@@ -166,6 +176,7 @@ end))
 _G.OnToggle("MobileAimTrigger", function(state)
     AimbotConfig.Active = state
     AimbotConfig.ToggleState = state
+    AimbotConfig.LockedTarget = state and getClosestTargetInFOV() or nil
 end)
 
 -- ControllerAimToggle fires from the RB button in main_ui or from mobile UI.
@@ -173,14 +184,16 @@ end)
 _G.OnToggle("ControllerAimToggle", function()
     if AimbotConfig.Mode == "Hold Toggle" then
         AimbotConfig.ToggleState = not AimbotConfig.ToggleState
+        AimbotConfig.LockedTarget = AimbotConfig.ToggleState and getClosestTargetInFOV() or nil
     elseif AimbotConfig.Mode == "Controller Bind" then
         -- In Controller Bind mode the RB shortcut acts as a software toggle
         AimbotConfig.Active = not AimbotConfig.Active
+        AimbotConfig.LockedTarget = AimbotConfig.Active and getClosestTargetInFOV() or nil
     end
     -- "Always On" needs no toggle — aim is driven by AimbotConfig.Enabled alone
 end)
 
-RunService:BindToRenderStep("AtomwareAimbot", Enum.RenderPriority.Camera.Value + 1, function()
+RunService:BindToRenderStep("AtomwareAimbot", Enum.RenderPriority.Camera.Value + 1, function(dt)
     local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     FOVCircle.Position = viewportCenter
     FOVCircle.Radius = AimbotConfig.FOV
@@ -197,13 +210,23 @@ RunService:BindToRenderStep("AtomwareAimbot", Enum.RenderPriority.Camera.Value +
         end
 
         if shouldAim then
-            local target = getClosestTargetInFOV()
+            local target = AimbotConfig.LockedTarget
+            if not target or not target.Parent or not target:IsDescendantOf(Workspace) then
+                target = getClosestTargetInFOV()
+                AimbotConfig.LockedTarget = target
+            end
             if target then
                 local currentCF = Camera.CFrame
                 local targetCF = CFrame.new(currentCF.Position, target.Position)
-                Camera.CFrame = currentCF:Lerp(targetCF, math.clamp(AimbotConfig.Smoothing, 0.01, 1))
+                local smoothing = math.clamp(AimbotConfig.Smoothing, 0.01, 1)
+                local alpha = 1 - ((1 - smoothing) ^ (math.max(dt, 1 / 240) * 60))
+                Camera.CFrame = currentCF:Lerp(targetCF, math.clamp(alpha, 0.01, 1))
             end
+        else
+            AimbotConfig.LockedTarget = nil
         end
+    else
+        AimbotConfig.LockedTarget = nil
     end
 end)
 if _G.AtomwareConfig then
@@ -357,26 +380,26 @@ local function registerESP(model)
     local head, torso = getPlayerParts(model)
     if not head or not torso then return end
 
-    local box = Drawing.new("Square")
+    local box = newDrawing("Square")
     box.Thickness = 1
     box.Filled = false
     box.Color = Color_Box
     box.Visible = false
 
-    local outline = Drawing.new("Square")
+    local outline = newDrawing("Square")
     outline.Thickness = 1
     outline.Filled = false
     outline.Color = Color3.fromRGB(0, 0, 0)
     outline.Visible = false
 
-    local txt = Drawing.new("Text")
+    local txt = newDrawing("Text")
     txt.Size = 14
     txt.Center = true
     txt.Outline = true
     txt.OutlineColor = Color3.fromRGB(0, 0, 0)
     txt.Visible = false
 
-    local weaponTxt = Drawing.new("Text")
+    local weaponTxt = newDrawing("Text")
     weaponTxt.Size = 13
     weaponTxt.Center = true
     weaponTxt.Outline = true
@@ -385,7 +408,7 @@ local function registerESP(model)
 
     local skelLines = {}
     for _, pair in ipairs(skeletonBones) do
-        local line = Drawing.new("Line")
+        local line = newDrawing("Line")
         line.Color = isPlayerModel(model) and Color_Skeleton or Color3.fromRGB(0, 150, 255)
         line.Thickness = 1.5
         line.Visible = false
@@ -590,7 +613,7 @@ local ArmorESP_Enabled = false
 local ArmorFOV_Radius = 220
 
 -- FOV circle for Armor ESP (green, separate from the aimbot purple circle)
-local ArmorFOVCircle = Drawing.new("Circle")
+local ArmorFOVCircle = newDrawing("Circle")
 ArmorFOVCircle.Visible = false
 ArmorFOVCircle.Thickness = 1.5
 ArmorFOVCircle.Color = Color3.fromRGB(0, 255, 0)
@@ -598,7 +621,7 @@ ArmorFOVCircle.Filled = false
 ArmorFOVCircle.NumSides = 64
 
 -- Line drawn from screen center to the closest armored target
-local ArmorSnapLine = Drawing.new("Line")
+local ArmorSnapLine = newDrawing("Line")
 ArmorSnapLine.Visible = false
 ArmorSnapLine.Thickness = 1.5
 ArmorSnapLine.Color = Color3.fromRGB(255, 75, 125)
@@ -840,7 +863,7 @@ local AirdropCache = {}
 
 -- Helper: make a simple ESP text drawing
 local function makeESPText(label, color)
-    local t = Drawing.new("Text")
+    local t = newDrawing("Text")
     t.Text = label
     t.Size = 14
     t.Center = true
@@ -1142,7 +1165,7 @@ local function registerOre(m)
     if oreCache[m] then return end
     local oType, oPart = identifyOre(m)
     if not oType then return end
-    local txt = Drawing.new("Text")
+    local txt = newDrawing("Text")
     txt.Size = 13
     txt.Center = true
     txt.Outline = true
@@ -1245,7 +1268,7 @@ local function registerVehicle(model)
     if not blueprints then return end
     for name, blueprint in pairs(blueprints) do
         if VehicleESP_Config[name] and matchesVehicle(model, blueprint) then
-            local drawing = Drawing.new("Text")
+            local drawing = newDrawing("Text")
             drawing.Size = 18
             drawing.Color = Color3.fromRGB(0, 255, 0)
             drawing.Center = true
@@ -1590,11 +1613,11 @@ local function armGetParts()
 end
 
 local function armRecacheOriginals()
-    ArmChams_OrigMaterial = {}
-    ArmChams_OrigColor    = {}
     for _, p in ipairs(armGetParts()) do
-        ArmChams_OrigMaterial[p] = p.Material
-        ArmChams_OrigColor[p]    = p.Color
+        if ArmChams_OrigMaterial[p] == nil then
+            ArmChams_OrigMaterial[p] = p.Material
+            ArmChams_OrigColor[p]    = p.Color
+        end
     end
 end
 
@@ -1610,12 +1633,16 @@ local function armApply()
 end
 
 local function armRestore()
-    for _, p in ipairs(armGetParts()) do
+    for p, material in pairs(ArmChams_OrigMaterial) do
         if p and p.Parent then
-            p.Material = ArmChams_OrigMaterial[p] or Enum.Material.Plastic
-            p.Color    = ArmChams_OrigColor[p]    or Color3.fromRGB(163, 162, 165)
+            pcall(function()
+                p.Material = material
+                p.Color = ArmChams_OrigColor[p]
+            end)
         end
     end
+    table.clear(ArmChams_OrigMaterial)
+    table.clear(ArmChams_OrigColor)
 end
 
 -- Re-cache whenever FPSArms children change (weapon switches, etc.)
@@ -1700,11 +1727,11 @@ local function weaponGetParts()
 end
 
 local function weaponRecacheOriginals()
-    WeaponChams_OrigMaterial = {}
-    WeaponChams_OrigColor    = {}
     for _, p in ipairs(weaponGetParts()) do
-        WeaponChams_OrigMaterial[p] = p.Material
-        WeaponChams_OrigColor[p]    = p.Color
+        if WeaponChams_OrigMaterial[p] == nil then
+            WeaponChams_OrigMaterial[p] = p.Material
+            WeaponChams_OrigColor[p]    = p.Color
+        end
     end
 end
 
@@ -1720,12 +1747,16 @@ local function weaponApply()
 end
 
 local function weaponRestore()
-    for _, p in ipairs(weaponGetParts()) do
+    for p, material in pairs(WeaponChams_OrigMaterial) do
         if p and p.Parent then
-            p.Material = WeaponChams_OrigMaterial[p] or Enum.Material.Plastic
-            p.Color    = WeaponChams_OrigColor[p]    or Color3.fromRGB(163, 162, 165)
+            pcall(function()
+                p.Material = material
+                p.Color = WeaponChams_OrigColor[p]
+            end)
         end
     end
+    table.clear(WeaponChams_OrigMaterial)
+    table.clear(WeaponChams_OrigColor)
 end
 
 -- Re-apply when a new weapon model is loaded into HandModels
@@ -1891,10 +1922,10 @@ local HitSoundConfig = {
 
 -- Four corner lines forming an X hitmarker (matches old script exactly)
 local HitmarkerLines = {
-    Drawing.new("Line"),
-    Drawing.new("Line"),
-    Drawing.new("Line"),
-    Drawing.new("Line"),
+    newDrawing("Line"),
+    newDrawing("Line"),
+    newDrawing("Line"),
+    newDrawing("Line"),
 }
 for _, line in ipairs(HitmarkerLines) do
     line.Visible   = false
@@ -2382,22 +2413,16 @@ if _G.AtomwareConfig then
             end
         end)
 
-        local seen = {}
-        local function removeDrawings(value)
-            if type(value) ~= "table" or seen[value] then return end
-            seen[value] = true
-            for _, child in pairs(value) do
-                if type(child) == "table" then
-                    removeDrawings(child)
-                elseif typeof(child) == "userdata" then
-                    pcall(function() child:Remove() end)
-                end
-            end
-        end
         for _, cache in ipairs({ espCache, ItemCache, CorpseCache, RaidCache, AirdropCache, oreCache, VehicleESP_Cache }) do
-            removeDrawings(cache)
             table.clear(cache)
         end
+        for _, drawing in ipairs(OwnedDrawings) do
+            pcall(function()
+                drawing.Visible = false
+                drawing:Remove()
+            end)
+        end
+        table.clear(OwnedDrawings)
         table.clear(originalTransparencies)
         table.clear(originalHeadStats)
         table.clear(WorldState.TreeLeaves)
