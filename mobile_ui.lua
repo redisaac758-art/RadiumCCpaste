@@ -16,31 +16,43 @@ local LocalPlayer = Players.LocalPlayer
 --//==================================================
 
 _G.AtomwareEvents = _G.AtomwareEvents or {}
+_G.AtomwarePendingEvents = {}
+
+local function registerAtomwareEvent(name, callback)
+    _G.AtomwareEvents[name] = callback
+    local pending = _G.AtomwarePendingEvents[name]
+    if pending then
+        _G.AtomwarePendingEvents[name] = nil
+        task.spawn(callback, table.unpack(pending, 1, pending.n))
+    end
+end
 
 _G.OnToggle = function(name, callback)
-    _G.AtomwareEvents[name] = callback
+    registerAtomwareEvent(name, callback)
 end
 
 _G.OnSlider = function(name, callback)
-    _G.AtomwareEvents[name] = callback
+    registerAtomwareEvent(name, callback)
 end
 
 _G.OnDropdown = function(name, callback)
-    _G.AtomwareEvents[name] = callback
+    registerAtomwareEvent(name, callback)
 end
 
 _G.OnColorPicker = function(name, callback)
-    _G.AtomwareEvents[name] = callback
+    registerAtomwareEvent(name, callback)
 end
 
 _G.OnKeybind = function(name, callback)
-    _G.AtomwareEvents[name] = callback
+    registerAtomwareEvent(name, callback)
 end
 
 _G.FireEvent = function(name, ...)
-    if _G.AtomwareEvents[name] then
-        task.spawn(_G.AtomwareEvents[name], ...)
-    end
+    local callback = _G.AtomwareEvents[name]
+    if callback then task.spawn(callback, ...); return end
+    local args = { ... }
+    args.n = select("#", ...)
+    _G.AtomwarePendingEvents[name] = args
 end
 
 --//==================================================
@@ -113,9 +125,9 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = true
 ScreenGui.DisplayOrder = 100
 
-pcall(function()
-    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-end)
+local playerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
+if not playerGui then error("Atomware: PlayerGui was unavailable after 10 seconds") end
+ScreenGui.Parent = playerGui
 
 --//==================================================
 --// FLOATING ACTION BUTTONS (MOBILE DRAGGABLE)
@@ -174,6 +186,8 @@ local MobileToggleBtn
 
 --//==================================================
 --// HOLD TOGGLE AIM BUTTON (Dynamic — only for "Hold Toggle" mode)
+-- Fixed position, non-draggable, large touch target.
+-- Only the background colour changes on toggle — icon and position never change.
 --//==================================================
 
 local mobileAimActive = false
@@ -184,12 +198,42 @@ local function createHoldToggleBtn()
         holdToggleBtn:Destroy()
         holdToggleBtn = nil
     end
-    holdToggleBtn = makeFloatingButton("HoldToggleAim", "🎯", THEME.Green, UDim2.new(1, -66, 1, -195), function()
+
+    -- Outer container: fixed bottom-right, never moves
+    local btn = Instance.new("TextButton")
+    btn.Name = "HoldToggleAim"
+    btn.Size = UDim2.fromOffset(80, 80)
+    -- Anchor to bottom-right corner, 14px inset from each edge
+    btn.AnchorPoint = Vector2.new(1, 1)
+    btn.Position = UDim2.new(1, -14, 1, -200)
+    btn.BackgroundColor3 = THEME.AccentDark
+    btn.AutoButtonColor = false
+    btn.Text = "🎯"
+    btn.TextSize = 32
+    btn.Font = FONT_BOLD
+    btn.TextColor3 = THEME.Text  -- colour never changes
+    btn.ZIndex = 20
+    btn.Parent = ScreenGui
+    corner(btn, 20)
+
+    -- Slightly thicker border so it stands out on screen
+    local btnStroke = stroke(btn, THEME.Accent, 2)
+
+    -- Tap: toggle aim state, only pulse the background colour
+    btn.MouseButton1Click:Connect(function()
         mobileAimActive = not mobileAimActive
         _G.FireEvent("MobileAimTrigger", mobileAimActive)
-        holdToggleBtn.TextColor3 = mobileAimActive and THEME.Red or THEME.Green
-        holdToggleBtn.Text = mobileAimActive and "🔒" or "🎯"
+
+        -- Active  → bright green fill + green border pulse
+        -- Inactive → dark accent fill + normal accent border
+        tween(btn, TweenInfo.new(0.12), {
+            BackgroundColor3 = mobileAimActive and THEME.Green or THEME.AccentDark
+        })
+        btnStroke.Color = mobileAimActive and THEME.Green or THEME.Accent
     end)
+
+    -- No drag listeners — position is intentionally locked
+    holdToggleBtn = btn
 end
 
 local function destroyHoldToggleBtn()
@@ -311,6 +355,7 @@ ContentArea.Parent = MainFrame
 local Pages = {}
 local TabButtons = {}
 local CurrentPageName = "Visuals"
+local responsiveLayouts = {}
 
 --//==================================================
 --// TWO-COLUMN PAGE CREATOR
@@ -332,6 +377,7 @@ local function createPage(name)
 
     -- Horizontal two-column container
     local colContainer = Instance.new("Frame")
+    colContainer.Name = "ColContainer"       -- named so getCols() can find it reliably
     colContainer.BackgroundTransparency = 1
     colContainer.Size = UDim2.new(1, 0, 0, 0)
     colContainer.AutomaticSize = Enum.AutomaticSize.Y
@@ -368,6 +414,8 @@ local function createPage(name)
     rightList.Padding = UDim.new(0, 8)
     rightList.SortOrder = Enum.SortOrder.LayoutOrder
     rightList.Parent = rightCol
+
+    table.insert(responsiveLayouts, { layout = hList, left = leftCol, right = rightCol })
 
     Pages[name] = page
     return page, leftCol, rightCol
@@ -461,7 +509,7 @@ local function createCard(parent, title)
     return card, body
 end
 
-local function createToggle(parent, setting, defaultState)
+local function createToggle(parent, setting, defaultState, onChange)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, 32)
     row.BackgroundTransparency = 1
@@ -497,9 +545,7 @@ local function createToggle(parent, setting, defaultState)
 
     local state = defaultState
     local function fire(v)
-        if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-            task.spawn(_G.AtomwareEvents[setting], v)
-        end
+        _G.FireEvent(setting, v)
     end
 
     btn.MouseButton1Click:Connect(function()
@@ -507,11 +553,74 @@ local function createToggle(parent, setting, defaultState)
         tween(btn, TweenInfo.new(0.14), { BackgroundColor3 = state and THEME.Accent or THEME.CardAlt })
         tween(knob, TweenInfo.new(0.14), { Position = state and UDim2.new(1, -19, 0.5, -8) or UDim2.fromOffset(3, 3) })
         fire(state)
+        if onChange then onChange(state) end
     end)
 
-    if defaultState then task.defer(function() fire(true) end) end
+    task.defer(function()
+        fire(defaultState)
+        if onChange then onChange(defaultState) end
+    end)
     return row
 end
+
+local function createFreeCamTouchPad()
+    local pad = Instance.new("Frame")
+    pad.Name = "FreeCamTouchControls"
+    pad.Size = UDim2.fromOffset(224, 142)
+    pad.Position = UDim2.new(0, 12, 1, -154)
+    pad.BackgroundTransparency = 1
+    pad.Visible = false
+    pad.ZIndex = 30
+    pad.Parent = ScreenGui
+
+    local function addButton(name, text, x, y, onStart, onStop)
+        local button = Instance.new("TextButton")
+        button.Name = name
+        button.Size = UDim2.fromOffset(42, 38)
+        button.Position = UDim2.fromOffset(x, y)
+        button.BackgroundColor3 = THEME.Header
+        button.BackgroundTransparency = 0.12
+        button.Text = text
+        button.TextColor3 = THEME.Text
+        button.TextSize = 16
+        button.Font = FONT_BOLD
+        button.AutoButtonColor = false
+        button.ZIndex = 31
+        button.Parent = pad
+        corner(button, 8)
+        stroke(button, THEME.Accent, 1)
+        button.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                onStart()
+            end
+        end)
+        button.InputEnded:Connect(function(input)
+            if onStop and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1) then
+                onStop()
+            end
+        end)
+    end
+
+    local function movementButton(name, text, x, y, keyName)
+        addButton(name, text, x, y,
+            function() _G.FireEvent("Free Cam Input", keyName, true) end,
+            function() _G.FireEvent("Free Cam Input", keyName, false) end)
+    end
+    movementButton("FreeCamForward", "▲", 46, 0, "W")
+    movementButton("FreeCamLeft", "◀", 0, 42, "A")
+    movementButton("FreeCamBack", "▼", 46, 42, "S")
+    movementButton("FreeCamRight", "▶", 92, 42, "D")
+    movementButton("FreeCamUp", "+", 46, 84, "Space")
+    movementButton("FreeCamDown", "−", 92, 84, "LeftShift")
+
+    addButton("FreeCamLookLeft", "⟲", 150, 20,
+        function() _G.FireEvent("Free Cam Look", -0.12, 0) end)
+    addButton("FreeCamLookRight", "⟳", 150, 62,
+        function() _G.FireEvent("Free Cam Look", 0.12, 0) end)
+    return pad
+end
+
+local freeCamTouchPad = createFreeCamTouchPad()
 
 local function createSlider(parent, setting, min, max, default, step, suffix)
     step = step or 1
@@ -581,9 +690,7 @@ local function createSlider(parent, setting, min, max, default, step, suffix)
         knob.Position = UDim2.new(pct, 0, 0.5, 0)
         valLbl.Text = tostring(val) .. suffix
 
-        if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-            task.spawn(_G.AtomwareEvents[setting], val)
-        end
+        _G.FireEvent(setting, val)
     end
 
     row.InputBegan:Connect(function(input)
@@ -606,9 +713,7 @@ local function createSlider(parent, setting, min, max, default, step, suffix)
     end)
 
     task.defer(function()
-        if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-            task.spawn(_G.AtomwareEvents[setting], val)
-        end
+        _G.FireEvent(setting, val)
     end)
 
     return row
@@ -703,17 +808,13 @@ local function createDropdown(parent, setting, options, default, onChange)
                     c.TextColor3 = (c.Text == "  " .. tostring(selected)) and THEME.AccentBright or THEME.TextMuted
                 end
             end
-            if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-                task.spawn(_G.AtomwareEvents[setting], selected)
-            end
+            if setting ~= "Controller Bind" then _G.FireEvent(setting, selected) end
             if onChange then onChange(selected) end
         end)
     end
 
     task.defer(function()
-        if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-            task.spawn(_G.AtomwareEvents[setting], selected)
-        end
+        if setting ~= "Controller Bind" then _G.FireEvent(setting, selected) end
         if onChange then onChange(selected) end
     end)
 
@@ -789,11 +890,11 @@ local function createColorPicker(parent, setting, defaultColor)
             preview.BackgroundColor3 = col
             open = false
             popover.Visible = false
-            if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-                task.spawn(_G.AtomwareEvents[setting], col)
-            end
+            _G.FireEvent(setting, col)
         end)
     end
+
+    task.defer(function() _G.FireEvent(setting, defaultColor) end)
 
     return row
 end
@@ -832,26 +933,51 @@ for _, t in ipairs(tabsData) do
     end)
 end
 
--- Helper to get both columns of a page
+-- Helper to get both columns of a page.
+-- Uses the named "ColContainer" child set in createPage() — robust against
+-- other Frame children that may exist on the ScrollingFrame.
 local function getCols(pageName)
     local page = Pages[pageName]
-    -- colContainer is the first child that has UIListLayout (Horizontal)
-    local col = page:FindFirstChild("Frame") -- colContainer
+    local col = page:FindFirstChild("ColContainer")
     if not col then
-        -- fallback: iterate children
+        -- Fallback: scan for the Frame that owns a horizontal UIListLayout
         for _, c in ipairs(page:GetChildren()) do
-            if c:IsA("Frame") then col = c break end
+            if c:IsA("Frame") then
+                local layout = c:FindFirstChildOfClass("UIListLayout")
+                if layout and layout.FillDirection == Enum.FillDirection.Horizontal then
+                    col = c
+                    break
+                end
+            end
         end
     end
     local left, right
-    for _, c in ipairs(col:GetChildren()) do
-        if c:IsA("Frame") then
-            if c.LayoutOrder == 1 then left = c
-            elseif c.LayoutOrder == 2 then right = c
+    if col then
+        for _, c in ipairs(col:GetChildren()) do
+            if c:IsA("Frame") then
+                if c.LayoutOrder == 1 then left = c
+                elseif c.LayoutOrder == 2 then right = c
+                end
             end
         end
     end
     return left, right
+end
+
+local function updateResponsiveColumns()
+    local camera = workspace.CurrentCamera
+    local isNarrow = camera and camera.ViewportSize.X < 640
+    for _, entry in ipairs(responsiveLayouts) do
+        if isNarrow then
+            entry.layout.FillDirection = Enum.FillDirection.Vertical
+            entry.left.Size = UDim2.new(1, 0, 0, 0)
+            entry.right.Size = UDim2.new(1, 0, 0, 0)
+        else
+            entry.layout.FillDirection = Enum.FillDirection.Horizontal
+            entry.left.Size = UDim2.new(0.5, -4, 0, 0)
+            entry.right.Size = UDim2.new(0.5, -4, 0, 0)
+        end
+    end
 end
 
 -- ---------------------------------------------------
@@ -917,7 +1043,7 @@ createToggle(bAimbot, "Aimbot Enabled", false)
 
 -- Controller bind selector row (hidden unless "Controller Bind" mode is active)
 local ctrlBindRow = createDropdown(bAimbot, "Controller Bind",
-    { "ButtonRT", "ButtonLT", "ButtonR2", "ButtonL2", "ButtonRB", "ButtonLB" }, "ButtonRT",
+    { "ButtonR2", "ButtonL2", "ButtonR3", "ButtonL3" }, "ButtonR2",
     function(bind)
         -- Fire "Aim Key" event so features.lua updates AimbotConfig.AimKey
         _G.FireEvent("Aim Key", bind)
@@ -928,7 +1054,7 @@ ctrlBindRow.Visible = false
 -- Aimbot Mode dropdown — onChange updates UI (ctrl bind row + hold toggle button)
 createDropdown(bAimbot, "Aimbot Mode",
     { "Always On", "Hold Toggle", "Controller Bind" },
-    "Always On",
+    "Controller Bind",
     function(mode)
         -- Show/hide controller bind row
         ctrlBindRow.Visible = (mode == "Controller Bind")
@@ -943,8 +1069,8 @@ createDropdown(bAimbot, "Aimbot Mode",
 )
 
 createToggle(bAimbot, "Show FOV Circle", true)
-createSlider(bAimbot, "Aimbot FOV", 10, 500, 140, 5, "px")
-createSlider(bAimbot, "Aimbot Smoothing", 0.01, 1, 0.20, 0.01, "")
+createSlider(bAimbot, "Aimbot FOV", 10, 500, 130, 5, "px")
+createSlider(bAimbot, "Aimbot Smoothing", 0.01, 1, 0.15, 0.01, "")
 createDropdown(bAimbot, "Aim Hit Part", { "Head", "UpperTorso", "HumanoidRootPart" }, "Head")
 createToggle(bAimbot, "Aimbot Team Check", true)
 
@@ -953,6 +1079,18 @@ local _, bBigHead = createCard(rCombat, "Big Head Hitbox")
 createToggle(bBigHead, "Big Head", false)
 createSlider(bBigHead, "Head Size", 1, 10, 2, 1, "x")
 createSlider(bBigHead, "Head Transparency", 0, 1, 0, 0.1, "")
+
+local _, bOverrideHB = createCard(rCombat, "Override Hitbox")
+createToggle(bOverrideHB, "Override Hitbox", false)
+createSlider(bOverrideHB, "OH Size X", 1, 25, 3, 0.5, "st")
+createSlider(bOverrideHB, "OH Size Y", 1, 25, 5, 0.5, "st")
+createSlider(bOverrideHB, "OH Size Z", 1, 25, 3, 0.5, "st")
+createSlider(bOverrideHB, "OH Transparency", 0, 1, 0.5, 0.05, "")
+createColorPicker(bOverrideHB, "OH Color", Color3.fromRGB(148, 0, 211))
+createDropdown(bOverrideHB, "OH Material", { "Neon", "ForceField", "Plastic", "SmoothPlastic" }, "Neon")
+
+local _, bForceHS = createCard(rCombat, "Force Headshots")
+createToggle(bForceHS, "Force Headshots", false)
 
 -- ---------------------------------------------------
 -- TAB 3: WORLD
@@ -993,6 +1131,7 @@ local lPlayer, rPlayer = getCols("Player")
 -- LEFT COLUMN
 local _, bCam = createCard(lPlayer, "Camera & Visual")
 createSlider(bCam, "FOV Changer", 50, 120, 70, 1, "°")
+createToggle(bCam, "Zoom Active", false)
 createToggle(bCam, "X-Ray Active", false)
 
 local _, bTrails = createCard(lPlayer, "Bullet & Arrow Trails")
@@ -1000,6 +1139,9 @@ createToggle(bTrails, "Bullet Trail", false)
 createColorPicker(bTrails, "Bullet Trail Color", Color3.fromRGB(255, 255, 255))
 createSlider(bTrails, "Trail Thickness", 0.1, 1, 0.2, 0.1, "")
 createSlider(bTrails, "Bullet Trail Length", 1, 25, 10, 1, "")
+createSlider(bTrails, "Trail LifeTime", 0.01, 5, 0.1, 0.05, "s")     -- M2: was missing
+createColorPicker(bTrails, "Arrow Trailcolor", Color3.fromRGB(255, 255, 255)) -- M3: was missing
+createSlider(bTrails, "Arrow Trail lifespan", 0.15, 20, 0.15, 0.1, "s")      -- M3: was missing
 
 -- RIGHT COLUMN
 local _, bHitSounds = createCard(rPlayer, "Hit Sounds")
@@ -1012,6 +1154,38 @@ createColorPicker(bChams, "Hand cham color", Color3.fromRGB(255, 255, 255))
 createDropdown(bChams, "Weapon Cham Material", { "Default", "ForceField", "Neon", "Asphalt" }, "Default")
 createColorPicker(bChams, "Weapon Cham Color", Color3.fromRGB(255, 255, 255))
 
+-- M5: FreeCam controls — missing from mobile but present in desktop + features.lua
+local _, bFreeCam = createCard(rPlayer, "Free Camera")
+createToggle(bFreeCam, "Free Cam Toggle", false, function(enabled)
+    freeCamTouchPad.Visible = enabled
+end)
+createSlider(bFreeCam, "FreeCam Speed", 1, 500, 150, 5, "")
+
+local _, bHitmarker = createCard(rPlayer, "Hitmarker")
+createToggle(bHitmarker, "Hitmarker Enabled", false)
+createColorPicker(bHitmarker, "Hitmarker Color", Color3.fromRGB(255, 255, 255))
+createSlider(bHitmarker, "Hitmarker Size", 5, 50, 20, 1, "px")
+createSlider(bHitmarker, "Hitmarker Thickness", 1, 5, 2, 0.5, "")
+createSlider(bHitmarker, "Hitmarker Duration", 0.1, 1, 0.3, 0.05, "s")
+
+local _, bHitSoundNew = createCard(rPlayer, "Hit Sound")
+createToggle(bHitSoundNew, "Hit Sound Enabled", false)
+createDropdown(bHitSoundNew, "Hit Sound Type", {
+    "rbxassetid://4764109000",
+    "rbxassetid://9119561046",
+    "rbxassetid://5043539486",
+    "rbxassetid://4817809188",
+    "rbxassetid://182765513",
+    "rbxassetid://269146157",
+    "rbxassetid://360661189",
+}, "rbxassetid://4764109000")
+createSlider(bHitSoundNew, "Hit Sound Volume", 0.1, 5, 1, 0.1, "")
+createSlider(bHitSoundNew, "Hit Sound Pitch", 0.1, 5, 1, 0.1, "")
+
+local _, bLongNeck = createCard(rPlayer, "Long Neck")
+createToggle(bLongNeck, "Long Neck", false)
+createSlider(bLongNeck, "Long Neck Strength", 1, 20, 5, 0.5, "st")
+
 -- ---------------------------------------------------
 -- TAB 5: SETTINGS
 -- ---------------------------------------------------
@@ -1021,8 +1195,8 @@ local lSettings, rSettings = getCols("Settings")
 local _, bMobileSet = createCard(lSettings, "Mobile Controls")
 local infoLbl = Instance.new("TextLabel")
 infoLbl.BackgroundTransparency = 1
-infoLbl.Text = "• Tap 'A' to Toggle UI\n• Hold Toggle mode shows aim button on screen\n• Drag floating buttons to reposition"
-infoLbl.Size = UDim2.new(1, 0, 0, 56)
+infoLbl.Text = "• Tap 'A' or press LB to toggle UI\n• Hold Toggle mode shows an aim button\n• Free Cam includes touch movement controls"
+infoLbl.Size = UDim2.new(1, 0, 0, 62)
 infoLbl.TextSize = 11
 infoLbl.TextColor3 = THEME.TextMuted
 infoLbl.Font = FONT
@@ -1044,6 +1218,28 @@ corner(destBtn, 6)
 destBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
 
 switchPage("Visuals")
+
+updateResponsiveColumns()
+local viewportConnection
+local function observeCurrentCamera()
+    if viewportConnection then viewportConnection:Disconnect() end
+    local camera = workspace.CurrentCamera
+    if camera then
+        viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateResponsiveColumns)
+    end
+    updateResponsiveColumns()
+end
+observeCurrentCamera()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(observeCurrentCamera)
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if input.UserInputType ~= Enum.UserInputType.Gamepad1 then return end
+    if input.KeyCode == Enum.KeyCode.ButtonL1 then
+        setUIVisible(not UIVisible)
+    elseif input.KeyCode == Enum.KeyCode.ButtonR1 then
+        _G.FireEvent("ControllerAimToggle")
+    end
+end)
 
 _G.AtomwareUILoaded = true
 print("Good to go")

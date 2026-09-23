@@ -16,31 +16,43 @@ local LocalPlayer = Players.LocalPlayer
 --//==================================================
 
 _G.AtomwareEvents = _G.AtomwareEvents or {}
+_G.AtomwarePendingEvents = {}
+
+local function registerAtomwareEvent(name, callback)
+    _G.AtomwareEvents[name] = callback
+    local pending = _G.AtomwarePendingEvents[name]
+    if pending then
+        _G.AtomwarePendingEvents[name] = nil
+        task.spawn(callback, table.unpack(pending, 1, pending.n))
+    end
+end
 
 _G.OnToggle = function(name, callback)
-    _G.AtomwareEvents[name] = callback
+    registerAtomwareEvent(name, callback)
 end
 
 _G.OnSlider = function(name, callback)
-    _G.AtomwareEvents[name] = callback
+    registerAtomwareEvent(name, callback)
 end
 
 _G.OnDropdown = function(name, callback)
-    _G.AtomwareEvents[name] = callback
+    registerAtomwareEvent(name, callback)
 end
 
 _G.OnColorPicker = function(name, callback)
-    _G.AtomwareEvents[name] = callback
+    registerAtomwareEvent(name, callback)
 end
 
 _G.OnKeybind = function(name, callback)
-    _G.AtomwareEvents[name] = callback
+    registerAtomwareEvent(name, callback)
 end
 
 _G.FireEvent = function(name, ...)
-    if _G.AtomwareEvents[name] then
-        task.spawn(_G.AtomwareEvents[name], ...)
-    end
+    local callback = _G.AtomwareEvents[name]
+    if callback then task.spawn(callback, ...); return end
+    local args = { ... }
+    args.n = select("#", ...)
+    _G.AtomwarePendingEvents[name] = args
 end
 
 --//==================================================
@@ -114,9 +126,9 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = true
 ScreenGui.DisplayOrder = 100
 
-pcall(function()
-    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-end)
+local playerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
+if not playerGui then error("Atomware: PlayerGui was unavailable after 10 seconds") end
+ScreenGui.Parent = playerGui
 
 --//==================================================
 --// MAIN WINDOW CONTAINER
@@ -126,11 +138,15 @@ local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 MainFrame.Position = UDim2.fromScale(0.5, 0.5)
-MainFrame.Size = UDim2.fromOffset(880, 560)
+MainFrame.Size = UDim2.new(0.92, 0, 0.90, 0)
 MainFrame.BackgroundColor3 = THEME.Background
 MainFrame.BorderSizePixel = 0
 MainFrame.ClipsDescendants = true
 MainFrame.Parent = ScreenGui
+local mainFrameSizeConstraint = Instance.new("UISizeConstraint")
+mainFrameSizeConstraint.MinSize = Vector2.new(0, 0)
+mainFrameSizeConstraint.MaxSize = Vector2.new(880, 560)
+mainFrameSizeConstraint.Parent = MainFrame
 corner(MainFrame, 12)
 stroke(MainFrame, THEME.Border, 1.5)
 
@@ -146,7 +162,7 @@ local function setUIVisible(state)
     if state then
         MainFrame.Visible = true
         tween(MainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-            Size = UDim2.fromOffset(880, 560)
+            Size = UDim2.new(0.92, 0, 0.90, 0)
         })
     else
         tween(MainFrame, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
@@ -412,9 +428,7 @@ local function createToggle(parent, setting, defaultState)
 
     local state = defaultState
     local function fire(v)
-        if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-            task.spawn(_G.AtomwareEvents[setting], v)
-        end
+        _G.FireEvent(setting, v)
     end
 
     btn.MouseButton1Click:Connect(function()
@@ -424,7 +438,7 @@ local function createToggle(parent, setting, defaultState)
         fire(state)
     end)
 
-    if defaultState then task.defer(function() fire(true) end) end
+    task.defer(function() fire(defaultState) end)
 
     table.insert(InteractiveElements, {
         Frame = row,
@@ -506,9 +520,7 @@ local function createSlider(parent, setting, min, max, default, step, suffix)
         knob.Position = UDim2.new(pct, 0, 0.5, 0)
         valLbl.Text = tostring(val) .. suffix
 
-        if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-            task.spawn(_G.AtomwareEvents[setting], val)
-        end
+        _G.FireEvent(setting, val)
     end
 
     row.InputBegan:Connect(function(input)
@@ -531,9 +543,7 @@ local function createSlider(parent, setting, min, max, default, step, suffix)
     end)
 
     task.defer(function()
-        if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-            task.spawn(_G.AtomwareEvents[setting], val)
-        end
+        _G.FireEvent(setting, val)
     end)
 
     table.insert(InteractiveElements, {
@@ -544,9 +554,7 @@ local function createSlider(parent, setting, min, max, default, step, suffix)
             fill.Size = UDim2.new(pct, 0, 1, 0)
             knob.Position = UDim2.new(pct, 0, 0.5, 0)
             valLbl.Text = tostring(val) .. suffix
-            if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-                task.spawn(_G.AtomwareEvents[setting], val)
-            end
+            _G.FireEvent(setting, val)
         end
     })
 
@@ -640,16 +648,12 @@ local function createDropdown(parent, setting, options, default)
                     c.TextColor3 = (c.Text == "  " .. tostring(selected)) and THEME.AccentBright or THEME.TextMuted
                 end
             end
-            if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-                task.spawn(_G.AtomwareEvents[setting], selected)
-            end
+            _G.FireEvent(setting, selected)
         end)
     end
 
     task.defer(function()
-        if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-            task.spawn(_G.AtomwareEvents[setting], selected)
-        end
+        _G.FireEvent(setting, selected)
     end)
 
     table.insert(InteractiveElements, { Frame = row, Action = toggle })
@@ -724,9 +728,7 @@ local function createColorPicker(parent, setting, defaultColor)
             preview.BackgroundColor3 = col
             open = false
             popover.Visible = false
-            if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-                task.spawn(_G.AtomwareEvents[setting], col)
-            end
+            _G.FireEvent(setting, col)
         end)
     end
 
@@ -734,6 +736,8 @@ local function createColorPicker(parent, setting, defaultColor)
         Frame = row,
         Action = function() open = not open popover.Visible = open end
     })
+
+    task.defer(function() _G.FireEvent(setting, defaultColor) end)
 
     return row
 end
@@ -768,6 +772,10 @@ local function createKeybind(parent, setting, defaultKey)
     stroke(btn, THEME.BorderDim, 1)
 
     local listening = false
+    local boundKey = defaultKey or "None"
+    local boundInputType = defaultKey and Enum.UserInputType[defaultKey] or nil
+    local actionKeybind = setting == "Xray" or setting == "Free Cam"
+    if not actionKeybind then task.defer(function() _G.FireEvent(setting, defaultKey) end) end
     btn.MouseButton1Click:Connect(function()
         listening = true
         btn.Text = "..."
@@ -776,15 +784,23 @@ local function createKeybind(parent, setting, defaultKey)
 
     UserInputService.InputBegan:Connect(function(input, gpe)
         if listening then
-            if input.UserInputType == Enum.UserInputType.Keyboard or input.UserInputType == Enum.UserInputType.Gamepad1 then
-                local kName = input.KeyCode.Name
+            if input.UserInputType == Enum.UserInputType.Keyboard
+                or input.UserInputType == Enum.UserInputType.Gamepad1
+                or input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.MouseButton2 then
+                local isButtonInput = input.UserInputType == Enum.UserInputType.MouseButton1
+                    or input.UserInputType == Enum.UserInputType.MouseButton2
+                local kName = isButtonInput and input.UserInputType.Name or input.KeyCode.Name
                 listening = false
+                boundKey = kName
+                boundInputType = isButtonInput and input.UserInputType or nil
                 btn.Text = kName
                 btn.TextColor3 = THEME.AccentBright
-                if _G.AtomwareEvents and _G.AtomwareEvents[setting] then
-                    task.spawn(_G.AtomwareEvents[setting], kName)
-                end
+                if not actionKeybind then _G.FireEvent(setting, kName) end
             end
+        elseif (not gpe or input.UserInputType == Enum.UserInputType.Gamepad1) and boundKey ~= "None"
+            and (input.KeyCode.Name == boundKey or input.UserInputType == boundInputType) then
+            _G.FireEvent(setting .. " Pressed")
         end
     end)
 
@@ -886,9 +902,11 @@ local pCombat = Pages["Combat"]
 
 local _, bAimbot = createCard(pCombat, "Aimbot Settings")
 createToggle(bAimbot, "Aimbot Enabled", false)
-createDropdown(bAimbot, "Aimbot Mode", { "Hold Aim Key", "Always On", "Tap / Toggle" }, "Hold Aim Key")
+-- Mode strings must match features.lua checks exactly:
+-- "Controller Bind" = hold key to aim, "Hold Toggle" = tap to toggle, "Always On" = always aims
+createDropdown(bAimbot, "Aimbot Mode", { "Controller Bind", "Always On", "Hold Toggle" }, "Controller Bind")
 createToggle(bAimbot, "Show FOV Circle", true)
-createSlider(bAimbot, "Aimbot FOV", 10, 500, 120, 5, "px")
+createSlider(bAimbot, "Aimbot FOV", 10, 500, 130, 5, "px")
 createSlider(bAimbot, "Aimbot Smoothing", 0.01, 1, 0.15, 0.01, "")
 createDropdown(bAimbot, "Aim Hit Part", { "Head", "UpperTorso", "HumanoidRootPart" }, "Head")
 createToggle(bAimbot, "Aimbot Team Check", true)
@@ -898,6 +916,18 @@ local _, bBigHead = createCard(pCombat, "Big Head Hitbox")
 createToggle(bBigHead, "Big Head", false)
 createSlider(bBigHead, "Head Size", 1, 10, 2, 1, "x")
 createSlider(bBigHead, "Head Transparency", 0, 1, 0, 0.1, "")
+
+local _, bOverrideHB = createCard(pCombat, "Override Hitbox")
+createToggle(bOverrideHB, "Override Hitbox", false)
+createSlider(bOverrideHB, "OH Size X", 1, 25, 3, 0.5, "st")
+createSlider(bOverrideHB, "OH Size Y", 1, 25, 5, 0.5, "st")
+createSlider(bOverrideHB, "OH Size Z", 1, 25, 3, 0.5, "st")
+createSlider(bOverrideHB, "OH Transparency", 0, 1, 0.5, 0.05, "")
+createColorPicker(bOverrideHB, "OH Color", Color3.fromRGB(148, 0, 211))
+createDropdown(bOverrideHB, "OH Material", { "Neon", "ForceField", "Plastic", "SmoothPlastic" }, "Neon")
+
+local _, bForceHS = createCard(pCombat, "Force Headshots")
+createToggle(bForceHS, "Force Headshots", false)
 
 -- ---------------------------------------------------
 -- TAB 3: WORLD
@@ -936,6 +966,7 @@ local pPlayer = Pages["Player"]
 local _, bCam = createCard(pPlayer, "Camera & FOV")
 createKeybind(bCam, "Xray", "V")
 createKeybind(bCam, "Zoom", "X")
+createToggle(bCam, "Zoom Active", false)
 createSlider(bCam, "FOV Changer", 50, 120, 70, 1, "°")
 
 local _, bHitSounds = createCard(pPlayer, "Hit Sounds")
@@ -961,12 +992,43 @@ local _, bFreeCam = createCard(pPlayer, "Free Camera")
 createKeybind(bFreeCam, "Free Cam", "Z")
 createSlider(bFreeCam, "FreeCam Speed", 1, 500, 150, 5, "")
 
+local _, bHitmarker = createCard(pPlayer, "Hitmarker")
+createToggle(bHitmarker, "Hitmarker Enabled", false)
+createColorPicker(bHitmarker, "Hitmarker Color", Color3.fromRGB(255, 255, 255))
+createSlider(bHitmarker, "Hitmarker Size", 5, 50, 20, 1, "px")
+createSlider(bHitmarker, "Hitmarker Thickness", 1, 5, 2, 0.5, "")
+createSlider(bHitmarker, "Hitmarker Duration", 0.1, 1, 0.3, 0.05, "s")
+
+local _, bHitSoundNew = createCard(pPlayer, "Hit Sound")
+createToggle(bHitSoundNew, "Hit Sound Enabled", false)
+createDropdown(bHitSoundNew, "Hit Sound Type", {
+    "rbxassetid://4764109000",
+    "rbxassetid://9119561046",
+    "rbxassetid://5043539486",
+    "rbxassetid://4817809188",
+    "rbxassetid://182765513",
+    "rbxassetid://269146157",
+    "rbxassetid://360661189",
+}, "rbxassetid://4764109000")
+createSlider(bHitSoundNew, "Hit Sound Volume", 0.1, 5, 1, 0.1, "")
+createSlider(bHitSoundNew, "Hit Sound Pitch", 0.1, 5, 1, 0.1, "")
+
+local _, bLongNeck = createCard(pPlayer, "Long Neck")
+createToggle(bLongNeck, "Long Neck", false)
+createSlider(bLongNeck, "Long Neck Strength", 1, 20, 5, 0.5, "st")
+
 -- ---------------------------------------------------
 -- TAB 5: SETTINGS
 -- ---------------------------------------------------
 local pSettings = Pages["Settings"]
 
+-- Declare the toggle key variable before the InputBegan listener so the
+-- keybind widget can update it at runtime.
+local menuToggleKey = Enum.KeyCode.Insert
+
 local _, bUISet = createCard(pSettings, "Menu Settings")
+-- U3: pass the keybind name through OnKeybind so changing the key in the UI
+--     actually updates menuToggleKey and takes effect immediately.
 createKeybind(bUISet, "Toggle Menu Key", "Insert")
 
 local destBtn = Instance.new("TextButton")
@@ -981,6 +1043,14 @@ corner(destBtn, 6)
 destBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
 
 switchPage("Visuals")
+
+-- Wire the "Toggle Menu Key" keybind so changing it in the UI updates menuToggleKey.
+-- createKeybind fires AtomwareEvents with the KeyCode name string.
+_G.OnKeybind("Toggle Menu Key", function(keyName)
+    if Enum.KeyCode[keyName] then
+        menuToggleKey = Enum.KeyCode[keyName]
+    end
+end)
 
 --//==================================================
 --// XBOX CONTROLLER ENGINE
@@ -1009,12 +1079,12 @@ local function updateControllerNav()
 end
 
 UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
+    if gpe and input.UserInputType ~= Enum.UserInputType.Gamepad1 then return end
 
     if input.UserInputType == Enum.UserInputType.Gamepad1 then
-        if input.KeyCode == Enum.KeyCode.ButtonLB then
+        if input.KeyCode == Enum.KeyCode.ButtonL1 then
             setUIVisible(not UIVisible)
-        elseif input.KeyCode == Enum.KeyCode.ButtonRB then
+        elseif input.KeyCode == Enum.KeyCode.ButtonR1 then
             _G.FireEvent("ControllerAimToggle")
         elseif input.KeyCode == Enum.KeyCode.DPadDown then
             focusedIndex = focusedIndex + 1
@@ -1044,7 +1114,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
             local cur = valid[focusedIndex]
             if cur and cur.Action then cur.Action() end
         end
-    elseif input.KeyCode == Enum.KeyCode.Insert then
+    elseif input.KeyCode == menuToggleKey then
         setUIVisible(not UIVisible)
     end
 end)

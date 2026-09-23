@@ -8,34 +8,64 @@ local UserInputService = game:GetService("UserInputService")
 local BASE_URL = "https://raw.githubusercontent.com/redisaac758-art/RadiumCCpaste/main/"
 
 -- Platform Detection
-local IS_MOBILE = UserInputService.TouchEnabled and (not UserInputService.MouseEnabled or not UserInputService.KeyboardEnabled)
+-- TouchEnabled alone is the correct signal for mobile/tablet — a tablet with a
+-- Bluetooth keyboard or mouse still reports MouseEnabled/KeyboardEnabled as true,
+-- so we must NOT use those to gate the check.
+local IS_MOBILE = UserInputService.TouchEnabled
 local targetUIFile = IS_MOBILE and "mobile_ui.lua" or "main_ui.lua"
 
--- 1. Load Targeted Platform UI
-local uiCode = game:HttpGet(BASE_URL .. targetUIFile)
-local uiFunc, uiErr = loadstring(uiCode)
-if uiFunc then
-    uiFunc()
-else
-    warn("Failed to load " .. targetUIFile .. ":", uiErr)
+local function loadRemote(path)
+    local ok, source = pcall(function()
+        return game:HttpGet(BASE_URL .. path)
+    end)
+    if not ok then
+        warn("Atomware: failed to download " .. path .. ":", source)
+        return false
+    end
+
+    local compileOk, chunk, compileErr = pcall(loadstring, source)
+    if not compileOk or not chunk then
+        warn("Atomware: failed to compile " .. path .. ":", compileErr or chunk)
+        return false
+    end
+
+    local runOk, runErr = pcall(chunk)
+    if not runOk then
+        warn("Atomware: failed to run " .. path .. ":", runErr)
+        return false
+    end
+    return true
 end
 
--- 2. Wait for UI hooks to initialize
-repeat task.wait() until _G.AtomwareUILoaded and _G.AtomwareEvents and _G.OnToggle
+-- 1. Load Targeted Platform UI
+if not loadRemote(targetUIFile) then return end
+
+-- 2. Wait for UI hooks to initialize (timeout after 15 s)
+local uiWaitCount = 0
+repeat
+    task.wait()
+    uiWaitCount = uiWaitCount + 1
+    if uiWaitCount > 900 then
+        warn("Atomware: UI failed to initialise after 15s — aborting.")
+        return
+    end
+until _G.AtomwareUILoaded and _G.AtomwareEvents and _G.OnToggle
 
 -- 3. Load Shared Features Engine
 if not _G.AtomwareFeaturesLoaded then
-    local featuresCode = game:HttpGet(BASE_URL .. "features.lua")
-    local featuresFunc, featuresErr = loadstring(featuresCode)
-    if featuresFunc then
-        featuresFunc()
-    else
-        warn("Failed to load features.lua:", featuresErr)
-    end
+    loadRemote("features.lua")
 end
 
--- 4. Verify everything is online
-repeat task.wait() until _G.AtomwareUILoaded and _G.AtomwareFeaturesLoaded
+-- 4. Verify everything is online (timeout after 15 s)
+local verifyCount = 0
+repeat
+    task.wait()
+    verifyCount = verifyCount + 1
+    if verifyCount > 900 then
+        warn("Atomware: Features failed to mark loaded after 15s — check features.lua for errors.")
+        break
+    end
+until _G.AtomwareUILoaded and _G.AtomwareFeaturesLoaded
 
 -- 5. Confirmation Print
 print("Fully Intalized")
