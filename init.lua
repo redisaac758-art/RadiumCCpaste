@@ -4,6 +4,12 @@
     Automatically detects platform (Mobile vs PC / Controller) and loads the dedicated UI + Features Backend
 ]]
 
+local ALLOWED_PLACE_ID = 13253735473
+if game.PlaceId ~= ALLOWED_PLACE_ID then
+    warn("Atomware: this script only runs in the allowed game (PlaceId " .. ALLOWED_PLACE_ID .. ").")
+    return
+end
+
 local UserInputService = game:GetService("UserInputService")
 local BASE_URL = "https://raw.githubusercontent.com/redisaac758-art/RadiumCCpaste/main/"
 
