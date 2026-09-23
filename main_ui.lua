@@ -282,6 +282,7 @@ ContentArea.Size = UDim2.new(1, -208, 1, -58)
 ContentArea.Parent = MainFrame
 
 local Pages = {}
+local PageColumns = {}
 local TabButtons = {}
 local InteractiveElements = {}
 local CurrentPageName = "Visuals"
@@ -299,12 +300,26 @@ local function createPage(name)
     page.Parent = ContentArea
     padding(page, 6, 8, 2, 14)
 
-    local grid = Instance.new("UIGridLayout")
-    grid.CellPadding = UDim2.fromOffset(10, 10)
-    grid.CellSize = UDim2.new(0.5, -5, 0, 0)
-    grid.SortOrder = Enum.SortOrder.LayoutOrder
-    grid.Parent = page
+    -- Each column owns a vertical layout so cards keep their content-driven
+    -- height. A UIGridLayout with a zero-height cell clipped/overlapped cards.
+    local columns = {}
+    for i = 1, 2 do
+        local column = Instance.new("Frame")
+        column.Name = i == 1 and "LeftColumn" or "RightColumn"
+        column.BackgroundTransparency = 1
+        column.Position = UDim2.new((i - 1) * 0.5, i == 1 and 6 or 4, 0, 2)
+        column.Size = UDim2.new(0.5, -12, 0, 0)
+        column.AutomaticSize = Enum.AutomaticSize.Y
+        column.Parent = page
 
+        local layout = Instance.new("UIListLayout")
+        layout.Padding = UDim.new(0, 10)
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.Parent = column
+        columns[i] = column
+    end
+
+    PageColumns[page] = { Columns = columns, Counts = { 0, 0 } }
     Pages[name] = page
     return page
 end
@@ -328,12 +343,21 @@ end
 --//==================================================
 
 local function createCard(parent, title)
+    local cardParent = parent
+    local pageLayout = PageColumns[parent]
+    if pageLayout then
+        local counts = pageLayout.Counts
+        local columnIndex = counts[1] <= counts[2] and 1 or 2
+        counts[columnIndex] = counts[columnIndex] + 1
+        cardParent = pageLayout.Columns[columnIndex]
+    end
+
     local card = Instance.new("Frame")
     card.Name = title .. "Card"
     card.BackgroundColor3 = THEME.Card
     card.Size = UDim2.new(1, 0, 0, 0)
     card.AutomaticSize = Enum.AutomaticSize.Y
-    card.Parent = parent
+    card.Parent = cardParent
     corner(card, 8)
     stroke(card, THEME.BorderDim, 1)
     padding(card, 10, 10, 8, 10)
@@ -773,7 +797,17 @@ local function createKeybind(parent, setting, defaultKey)
 
     local listening = false
     local boundKey = defaultKey or "None"
-    local boundInputType = defaultKey and Enum.UserInputType[defaultKey] or nil
+    local boundInputType
+    if defaultKey then
+        -- Keyboard keys (V, X, Insert, etc.) are KeyCodes, not UserInputTypes.
+        -- Only mouse buttons should be matched against UserInputType.
+        for _, inputType in ipairs(Enum.UserInputType:GetEnumItems()) do
+            if inputType.Name == defaultKey then
+                boundInputType = inputType
+                break
+            end
+        end
+    end
     local actionKeybind = setting == "Xray" or setting == "Free Cam"
     if not actionKeybind then task.defer(function() _G.FireEvent(setting, defaultKey) end) end
     btn.MouseButton1Click:Connect(function()
