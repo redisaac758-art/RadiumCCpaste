@@ -26,7 +26,11 @@ end
 local OwnedDrawings = {}
 local function newDrawing(kind)
     local drawing = Drawing.new(kind)
-    table.insert(OwnedDrawings, drawing)
+    if _G.AtomwareCleanup and _G.AtomwareCleanup.TrackDrawing then
+        _G.AtomwareCleanup:TrackDrawing(drawing)
+    else
+        table.insert(OwnedDrawings, drawing)
+    end
     return drawing
 end
 local Camera = Workspace.CurrentCamera or Workspace:WaitForChild("Camera", 10)

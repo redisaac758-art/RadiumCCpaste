@@ -175,11 +175,17 @@ if supported("readfile") and supported("isfile") then
 end
 
 function Config:TrackConnection(connection)
+    if _G.AtomwareCleanup and _G.AtomwareCleanup.TrackConnection then
+        return _G.AtomwareCleanup:TrackConnection(connection)
+    end
     if connection then table.insert(Config.Connections, connection) end
     return connection
 end
 
 function Config:TrackTask(thread)
+    if _G.AtomwareCleanup and _G.AtomwareCleanup.TrackTask then
+        return _G.AtomwareCleanup:TrackTask(thread)
+    end
     if thread then table.insert(Config.Tasks, thread) end
     return thread
 end
@@ -399,7 +405,11 @@ function Config:Notify(message, duration)
 end
 
 function Config:OnUnload(callback)
-    if type(callback) == "function" then table.insert(Config.Cleanup, callback) end
+    if _G.AtomwareCleanup and _G.AtomwareCleanup.TrackRestore then
+        _G.AtomwareCleanup:TrackRestore(callback)
+    elseif type(callback) == "function" then
+        table.insert(Config.Cleanup, callback)
+    end
 end
 
 function Config:Unload(screenGui)
@@ -413,12 +423,17 @@ function Config:Unload(screenGui)
         end
     end
     _G.AtomwareForceHeadshots = false
-    for _, connection in ipairs(Config.Connections) do pcall(function() connection:Disconnect() end) end
-    Config.Connections = {}
-    for _, thread in ipairs(Config.Tasks) do pcall(task.cancel, thread) end
-    Config.Tasks = {}
-    for _, callback in ipairs(Config.Cleanup) do pcall(callback) end
-    Config.Cleanup = {}
+    local cleanup = _G.AtomwareCleanup
+    if cleanup and type(cleanup.Run) == "function" then
+        cleanup:Run(Config)
+    else
+        for _, connection in ipairs(Config.Connections) do pcall(function() connection:Disconnect() end) end
+        Config.Connections = {}
+        for _, thread in ipairs(Config.Tasks) do pcall(task.cancel, thread) end
+        Config.Tasks = {}
+        for _, callback in ipairs(Config.Cleanup) do pcall(callback) end
+        Config.Cleanup = {}
+    end
     local cursorEnabled = Config.CursorWasEnabled
     if Config.CursorEnabledBeforeCustom ~= nil then
         cursorEnabled = Config.CursorEnabledBeforeCustom

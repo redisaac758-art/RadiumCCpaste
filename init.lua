@@ -119,6 +119,10 @@ if not loadRemote("config.lua") then
     warn("Atomware: shared configuration could not be loaded; startup aborted.")
     return
 end
+if not loadRemote("cleanup.lua") then
+    warn("Atomware: cleanup manager could not be loaded; startup aborted.")
+    return
+end
 
 _G.AtomwareUnload = function()
     local player = game:GetService("Players").LocalPlayer
