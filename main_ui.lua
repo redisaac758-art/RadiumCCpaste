@@ -832,6 +832,7 @@ local function createKeybind(parent, setting, defaultKey)
             if inputType.Name == keyName then boundInputType = inputType break end
         end
         btn.Text = keyName
+        if _G.AtomwareConfig then _G.AtomwareConfig:Store(setting, keyName) end
         if not actionKeybind then _G.FireEvent(setting, keyName) end
         if _G.AtomwareConfig then _G.AtomwareConfig:Refresh() end
     end
@@ -1095,6 +1096,12 @@ end)
 createToggle(bUISet, "Show Watermark", false, function(v)
     if _G.AtomwareConfig then _G.AtomwareConfig:SetWatermarkVisible(v) end
 end)
+createToggle(bUISet, "Show FPS Counter", false, function(v)
+    if _G.AtomwareConfig then _G.AtomwareConfig:SetFPSCounterVisible(v) end
+end)
+createToggle(bUISet, "Raid Alerts", false)
+createToggle(bUISet, "Airdrop Alerts", false)
+createSlider(bUISet, "Alert Duration", 1, 10, 3, 1, "s")
 createColorPicker(bUISet, "Watermark Color", Color3.fromRGB(205, 104, 255), function(v)
     if _G.AtomwareConfig then _G.AtomwareConfig:SetWatermarkColor(v) end
 end)

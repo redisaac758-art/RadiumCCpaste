@@ -138,7 +138,6 @@ end
 --       We must check BOTH independently because gamepad input reports Gamepad1
 --       as UserInputType and the actual button (such as ButtonR2) as KeyCode.
 trackConnection(UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe and input.UserInputType ~= Enum.UserInputType.Gamepad1 then return end
     local keyMatch = (input.UserInputType == AimbotConfig.AimKey)
         or (input.KeyCode == AimbotConfig.AimKey)
     if not keyMatch then return end
@@ -181,7 +180,7 @@ _G.OnToggle("ControllerAimToggle", function()
     -- "Always On" needs no toggle — aim is driven by AimbotConfig.Enabled alone
 end)
 
-trackConnection(RunService.RenderStepped:Connect(function()
+RunService:BindToRenderStep("AtomwareAimbot", Enum.RenderPriority.Camera.Value + 1, function()
     local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     FOVCircle.Position = viewportCenter
     FOVCircle.Radius = AimbotConfig.FOV
@@ -206,7 +205,10 @@ trackConnection(RunService.RenderStepped:Connect(function()
             end
         end
     end
-end))
+end)
+if _G.AtomwareConfig then
+    _G.AtomwareConfig:OnUnload(function() RunService:UnbindFromRenderStep("AtomwareAimbot") end)
+end
 
 _G.OnToggle("Aimbot Enabled", function(s) AimbotConfig.Enabled = s end)
 _G.OnDropdown("Aimbot Mode", function(m) AimbotConfig.Mode = m end)
@@ -813,6 +815,23 @@ local ItemESP_Enabled = false
 local CorpseESP_Enabled = false
 local RaidESP_Enabled = false
 local AirdropESP_Enabled = false
+local RaidAlertsEnabled = false
+local AirdropAlertsEnabled = false
+local AlertDuration = 3
+local lastAlertAt = { Raid = 0, Airdrop = 0 }
+
+local function notifyWorldEvent(kind, position)
+    local now = os.clock()
+    if now - lastAlertAt[kind] < 4 then return end
+    lastAlertAt[kind] = now
+    if not (_G.AtomwareConfig and _G.AtomwareConfig.Notify) then return end
+    local distance = position and math.floor((position - Camera.CFrame.Position).Magnitude + 0.5)
+    _G.AtomwareConfig:Notify(distance and (kind .. " detected • " .. distance .. "m") or (kind .. " detected"), AlertDuration)
+end
+
+_G.OnToggle("Raid Alerts", function(s) RaidAlertsEnabled = s end)
+_G.OnToggle("Airdrop Alerts", function(s) AirdropAlertsEnabled = s end)
+_G.OnSlider("Alert Duration", function(v) AlertDuration = math.clamp(v, 1, 10) end)
 
 local ItemCache = {}
 local CorpseCache = {}
@@ -906,7 +925,7 @@ end))
 
 -- ---- AIRDROP ESP ----
 -- Airdrops are models that contain a child named "Crates" or "Cables".
-local function registerAirdrop(m)
+local function registerAirdrop(m, isNew)
     if AirdropCache[m] then return end
     if not m or not m.Parent then return end
     local container = m:FindFirstChild("Crates") or m:FindFirstChild("Cables")
@@ -914,6 +933,7 @@ local function registerAirdrop(m)
     if not anchor then return end
     local txt = makeESPText("Airdrop", Color3.fromRGB(255, 255, 0))
     AirdropCache[m] = { drawing = txt, part = anchor }
+    if isNew and AirdropAlertsEnabled then notifyWorldEvent("Airdrop", anchor.Position) end
     trackConnection(m.Destroying:Connect(function()
         if AirdropCache[m] then
             pcall(function() AirdropCache[m].drawing:Remove() end)
@@ -924,12 +944,12 @@ end
 
 local function scanAirdrops()
     for _, model in ipairs(Workspace:GetChildren()) do
-        if model:IsA("Model") then registerAirdrop(model) end
+        if model:IsA("Model") then registerAirdrop(model, false) end
     end
 end
 
 trackConnection(Workspace.ChildAdded:Connect(function(c)
-    if c:IsA("Model") then task.wait(0.05); registerAirdrop(c) end
+    if c:IsA("Model") then task.wait(0.05); registerAirdrop(c, true) end
 end))
 
 -- ---- RAID ESP ----
@@ -937,9 +957,12 @@ end))
 local hitSoundNames = { Explosion = true, Explosion_Muffled = true }
 local function registerSound(sound)
     trackConnection(sound.Played:Connect(function()
-        if RaidESP_Enabled and sound.Parent and sound.Parent:IsA("BasePart") then
+        if (RaidESP_Enabled or RaidAlertsEnabled) and sound.Parent and sound.Parent:IsA("BasePart") then
+            local position = sound.Parent.Position
+            if RaidAlertsEnabled then notifyWorldEvent("Raid", position) end
+            if not RaidESP_Enabled then return end
             local txt = makeESPText("Raid", Color3.fromRGB(255, 75, 125))
-            table.insert(RaidCache, { text = txt, position = sound.Parent.Position, startTime = tick() })
+            table.insert(RaidCache, { text = txt, position = position, startTime = tick() })
         end
     end))
 end
@@ -1496,21 +1519,32 @@ local hitSoundAudioIds = {
     Pop = "rbxassetid://127231141534262", Zap = "rbxassetid://9119594928"
 }
 local currentHitSound = "Default"
-local currentHitVolume = 1
+local currentLegacyHitVolume = 1
+
+local function applyLegacyHitSound(sound)
+    if not sound or not sound:IsA("Sound") then return end
+    sound.SoundId = hitSoundAudioIds[currentHitSound] or hitSoundAudioIds.Default
+    sound.Volume = currentLegacyHitVolume
+end
+local existingLegacyHitSound = SoundService:FindFirstChild("PlayerHitHeadshot")
+if existingLegacyHitSound then applyLegacyHitSound(existingLegacyHitSound) end
+trackConnection(SoundService.ChildAdded:Connect(function(child)
+    if child.Name == "PlayerHitHeadshot" then applyLegacyHitSound(child) end
+end))
 
 _G.OnDropdown("Hit sound", function(sndName)
     local changed = sndName ~= currentHitSound
     currentHitSound = sndName
     local snd = SoundService:FindFirstChild("PlayerHitHeadshot")
-    if snd then
-        snd.SoundId = hitSoundAudioIds[sndName] or hitSoundAudioIds.Default
+    if snd and snd:IsA("Sound") then
+        applyLegacyHitSound(snd)
         if changed then snd:Play() end
     end
 end)
 _G.OnSlider("Hit sound Volume", function(vol)
-    currentHitVolume = vol
+    currentLegacyHitVolume = vol
     local snd = SoundService:FindFirstChild("PlayerHitHeadshot")
-    if snd then snd.Volume = vol end
+    if snd then applyLegacyHitSound(snd) end
 end)
 
 --//==================================================

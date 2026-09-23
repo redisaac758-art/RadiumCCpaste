@@ -19,9 +19,13 @@ local Config = {
     NotificationCorner = "TopRight",
     KeybindListVisible = false,
     WatermarkVisible = false,
+    FPSCounterVisible = false,
+    FPSCounter = nil,
+    ActiveToasts = {},
     CustomCursorVisible = false,
     WatermarkColor = Color3.fromRGB(205, 104, 255),
     CursorWasEnabled = UserInputService.MouseIconEnabled,
+    CursorEnabledBeforeCustom = nil,
 }
 
 local function supported(name)
@@ -206,6 +210,33 @@ function Config:AttachUI(screenGui, deviceName)
     watermarkCorner.Parent = watermark
     Config.Watermark = watermark
 
+    local fpsCounter = Instance.new("TextLabel")
+    fpsCounter.Name = "AtomwareFPSCounter"
+    fpsCounter.AnchorPoint = Vector2.new(0, 0)
+    fpsCounter.Position = UDim2.new(0, 12, 0, 12)
+    fpsCounter.Size = UDim2.fromOffset(100, 26)
+    fpsCounter.BackgroundColor3 = Color3.fromRGB(10, 7, 20)
+    fpsCounter.BackgroundTransparency = 0.15
+    fpsCounter.TextColor3 = Config.WatermarkColor
+    fpsCounter.Text = "FPS: --"
+    fpsCounter.TextSize = 12
+    fpsCounter.Font = Enum.Font.GothamBold
+    fpsCounter.Visible = Config.FPSCounterVisible
+    fpsCounter.Parent = screenGui
+    local fpsCorner = Instance.new("UICorner")
+    fpsCorner.CornerRadius = UDim.new(0, 7)
+    fpsCorner.Parent = fpsCounter
+    Config.FPSCounter = fpsCounter
+    local elapsed, frames = 0, 0
+    Config:TrackConnection(game:GetService("RunService").RenderStepped:Connect(function(dt)
+        frames = frames + 1
+        elapsed = elapsed + dt
+        if elapsed >= 0.5 then
+            fpsCounter.Text = "FPS: " .. tostring(math.floor(frames / elapsed + 0.5))
+            frames, elapsed = 0, 0
+        end
+    end))
+
     local keybindPanel = Instance.new("Frame")
     keybindPanel.Name = "AtomwareKeybindList"
     keybindPanel.AnchorPoint = Vector2.new(1, 0)
@@ -258,6 +289,10 @@ function Config:Refresh()
         Config.CustomCursor.Visible = Config.CustomCursorVisible
         Config.CustomCursor.BackgroundColor3 = Config.WatermarkColor
     end
+    if Config.FPSCounter then
+        Config.FPSCounter.Visible = Config.FPSCounterVisible
+        Config.FPSCounter.TextColor3 = Config.WatermarkColor
+    end
     if not Config.KeybindPanel then return end
     Config.KeybindPanel.Visible = Config.KeybindListVisible
     for _, child in ipairs(Config.KeybindPanel:GetChildren()) do
@@ -295,6 +330,11 @@ function Config:SetWatermarkVisible(value)
     Config:Refresh()
 end
 
+function Config:SetFPSCounterVisible(value)
+    Config.FPSCounterVisible = value == true
+    Config:Refresh()
+end
+
 function Config:SetWatermarkColor(value)
     if typeof(value) ~= "Color3" then return end
     Config.WatermarkColor = value
@@ -302,8 +342,15 @@ function Config:SetWatermarkColor(value)
 end
 
 function Config:SetCustomCursorVisible(value)
-    Config.CustomCursorVisible = value == true
-    UserInputService.MouseIconEnabled = not Config.CustomCursorVisible
+    value = value == true
+    if value and not Config.CustomCursorVisible then
+        Config.CursorEnabledBeforeCustom = UserInputService.MouseIconEnabled
+    elseif not value and Config.CustomCursorVisible and Config.CursorEnabledBeforeCustom ~= nil then
+        UserInputService.MouseIconEnabled = Config.CursorEnabledBeforeCustom
+        Config.CursorEnabledBeforeCustom = nil
+    end
+    Config.CustomCursorVisible = value
+    if value then UserInputService.MouseIconEnabled = false end
     Config:Refresh()
 end
 
@@ -313,7 +360,7 @@ function Config:SetNotificationCorner(value)
     end
 end
 
-function Config:Notify(message)
+function Config:Notify(message, duration)
     if not Config.ScreenGui then return end
     local top = Config.NotificationCorner:sub(1, 3) == "Top"
     local left = Config.NotificationCorner:sub(-4) == "Left"
@@ -333,7 +380,22 @@ function Config:Notify(message)
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 7)
     corner.Parent = toast
-    task.delay(3, function() if toast.Parent then toast:Destroy() end end)
+    table.insert(Config.ActiveToasts, toast)
+    local function arrangeToasts()
+        for index, activeToast in ipairs(Config.ActiveToasts) do
+            local offset = (index - 1) * 48
+            activeToast.Position = UDim2.new(left and 0 or 1, left and 12 or -12,
+                top and 0 or 1, top and (12 + offset) or (-12 - offset))
+        end
+    end
+    arrangeToasts()
+    task.delay(math.clamp(tonumber(duration) or 3, 1, 10), function()
+        for index, activeToast in ipairs(Config.ActiveToasts) do
+            if activeToast == toast then table.remove(Config.ActiveToasts, index) break end
+        end
+        if toast.Parent then toast:Destroy() end
+        arrangeToasts()
+    end)
 end
 
 function Config:OnUnload(callback)
@@ -356,7 +418,11 @@ function Config:Unload(screenGui)
     Config.Connections = {}
     for _, thread in ipairs(Config.Tasks) do pcall(task.cancel, thread) end
     Config.Tasks = {}
-    UserInputService.MouseIconEnabled = Config.CursorWasEnabled
+    local cursorEnabled = Config.CursorWasEnabled
+    if Config.CursorEnabledBeforeCustom ~= nil then
+        cursorEnabled = Config.CursorEnabledBeforeCustom
+    end
+    UserInputService.MouseIconEnabled = cursorEnabled
     if screenGui then pcall(function() screenGui:Destroy() end) end
     _G.AtomwareUILoaded = false
     _G.AtomwareFeaturesLoaded = false

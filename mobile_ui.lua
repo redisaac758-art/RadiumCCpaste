@@ -149,6 +149,84 @@ if _G.AtomwareConfig then _G.AtomwareConfig:AttachUI(ScreenGui, "Mobile") end
 --// FLOATING ACTION BUTTONS (MOBILE DRAGGABLE)
 --//==================================================
 
+local mobileLayoutEditing = false
+local mobileControlScale = 1
+local mobileLayoutControls = {}
+local mobileLayoutHandles = {}
+local freeCamTouchPad
+local freeCamEnabled = false
+
+local function configureMobileControl(frame, name, defaultX, defaultY)
+    frame.AnchorPoint = Vector2.new(0.5, 0.5)
+    local function setX(value) frame.Position = UDim2.new(value, 0, frame.Position.Y.Scale, 0) end
+    local function setY(value) frame.Position = UDim2.new(frame.Position.X.Scale, 0, value, 0) end
+    local config = _G.AtomwareConfig
+    local storedX = config and config.Values[name .. " X"]
+    local storedY = config and config.Values[name .. " Y"]
+    local validatePosition = function(v) return type(v) == "number" and v >= 0.03 and v <= 0.97 end
+    local x = bindSetting(name .. " X", storedX or defaultX, setX, validatePosition)
+    local y = bindSetting(name .. " Y", storedY or defaultY, setY, validatePosition)
+    frame.Position = UDim2.fromScale(x, y)
+    local scale = Instance.new("UIScale")
+    scale.Scale = mobileControlScale
+    scale.Parent = frame
+    table.insert(mobileLayoutControls, { frame = frame, scale = scale })
+
+    local grip = Instance.new("TextButton")
+    grip.Name = "LayoutDragHandle"
+    grip.Size = UDim2.new(1, 0, 0, 24)
+    grip.BackgroundColor3 = THEME.Accent
+    grip.BackgroundTransparency = 0.15
+    grip.Text = "DRAG"
+    grip.TextSize = 9
+    grip.TextColor3 = THEME.Text
+    grip.Font = FONT_BOLD
+    grip.Visible = mobileLayoutEditing
+    grip.ZIndex = 150
+    grip.Parent = frame
+    corner(grip, 6)
+    local dragging, dragInput, dragStart = false, nil, nil
+    trackConnection(grip.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging, dragInput, dragStart = true, input, input.Position
+        end
+    end))
+    trackConnection(UserInputService.InputChanged:Connect(function(input)
+        if not dragging or (input.UserInputType ~= Enum.UserInputType.Touch and input.UserInputType ~= Enum.UserInputType.MouseMovement) then return end
+        if dragInput and dragInput.UserInputType == Enum.UserInputType.Touch and input ~= dragInput then return end
+        local camera = workspace.CurrentCamera
+        if not camera then return end
+        local delta = input.Position - dragStart
+        local center = frame.AbsolutePosition + Vector2.new(
+            frame.AbsoluteSize.X * frame.AnchorPoint.X,
+            frame.AbsoluteSize.Y * frame.AnchorPoint.Y
+        ) + delta
+        local nx = math.clamp(center.X / camera.ViewportSize.X, 0.03, 0.97)
+        local ny = math.clamp(center.Y / camera.ViewportSize.Y, 0.03, 0.97)
+        frame.Position = UDim2.fromScale(nx, ny)
+        if _G.AtomwareConfig then
+            _G.AtomwareConfig:Store(name .. " X", nx)
+            _G.AtomwareConfig:Store(name .. " Y", ny)
+        end
+        dragStart = input.Position
+    end))
+    trackConnection(UserInputService.InputEnded:Connect(function(input)
+        if dragging and (input == dragInput or input.UserInputType == Enum.UserInputType.MouseButton1) then dragging, dragInput = false, nil end
+    end))
+    return function(editing) grip.Visible = editing end
+end
+
+local function setMobileLayoutEditing(enabled)
+    mobileLayoutEditing = enabled == true
+    for _, setVisible in ipairs(mobileLayoutHandles) do setVisible(mobileLayoutEditing) end
+    if freeCamTouchPad then freeCamTouchPad.Visible = freeCamEnabled or mobileLayoutEditing end
+end
+
+local function setMobileControlScale(value)
+    mobileControlScale = math.clamp(value, 0.7, 1.5)
+    for _, item in ipairs(mobileLayoutControls) do item.scale.Scale = mobileControlScale end
+end
+
 local function makeFloatingButton(name, text, iconColor, initPos, onClick)
     local btn = Instance.new("TextButton")
     btn.Name = name
@@ -163,32 +241,7 @@ local function makeFloatingButton(name, text, iconColor, initPos, onClick)
     btn.Parent = ScreenGui
     corner(btn, 16)
     stroke(btn, THEME.Accent, 1.5)
-
-    local isDragging = false
-    local dragStart, startPos
-
-    trackConnection(btn.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-            isDragging = true
-            dragStart = input.Position
-            startPos = btn.Position
-            trackConnection(input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    isDragging = false
-                end
-            end))
-        end
-    end))
-
-    trackConnection(UserInputService.InputChanged:Connect(function(input)
-        if isDragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-            local delta = input.Position - dragStart
-            btn.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y
-            )
-        end
-    end))
+    table.insert(mobileLayoutHandles, configureMobileControl(btn, name, 0.92, 0.84))
 
     trackConnection(btn.MouseButton1Click:Connect(function()
         if onClick then onClick(btn) end
@@ -208,6 +261,7 @@ local MobileToggleBtn
 
 local mobileAimActive = false
 local holdToggleBtn = nil
+local holdToggleLayoutHandle = nil
 
 local function createHoldToggleBtn()
     if holdToggleBtn then
@@ -220,8 +274,8 @@ local function createHoldToggleBtn()
     btn.Name = "HoldToggleAim"
     btn.Size = UDim2.fromOffset(80, 80)
     -- Anchor to bottom-right corner, 14px inset from each edge
-    btn.AnchorPoint = Vector2.new(1, 1)
-    btn.Position = UDim2.new(1, -14, 1, -200)
+    btn.AnchorPoint = Vector2.new(0.5, 0.5)
+    btn.Position = UDim2.fromScale(0.91, 0.70)
     btn.BackgroundColor3 = THEME.AccentDark
     btn.AutoButtonColor = false
     btn.Text = "🎯"
@@ -231,6 +285,8 @@ local function createHoldToggleBtn()
     btn.ZIndex = 20
     btn.Parent = ScreenGui
     corner(btn, 20)
+    holdToggleLayoutHandle = configureMobileControl(btn, "Aim Control", 0.91, 0.70)
+    table.insert(mobileLayoutHandles, holdToggleLayoutHandle)
 
     -- Slightly thicker border so it stands out on screen
     local btnStroke = stroke(btn, THEME.Accent, 2)
@@ -256,6 +312,10 @@ local function destroyHoldToggleBtn()
     if holdToggleBtn then
         holdToggleBtn:Destroy()
         holdToggleBtn = nil
+        for i, setVisible in ipairs(mobileLayoutHandles) do
+            if setVisible == holdToggleLayoutHandle then table.remove(mobileLayoutHandles, i) break end
+        end
+        holdToggleLayoutHandle = nil
         mobileAimActive = false
         _G.FireEvent("MobileAimTrigger", false)
     end
@@ -581,11 +641,12 @@ local function createFreeCamTouchPad()
     local pad = Instance.new("Frame")
     pad.Name = "FreeCamTouchControls"
     pad.Size = UDim2.fromOffset(224, 142)
-    pad.Position = UDim2.new(0, 12, 1, -154)
+    pad.Position = UDim2.fromScale(0.36, 0.90)
     pad.BackgroundTransparency = 1
     pad.Visible = false
     pad.ZIndex = 30
     pad.Parent = ScreenGui
+    table.insert(mobileLayoutHandles, configureMobileControl(pad, "Free Camera Pad", 0.36, 0.90))
 
     local function addButton(name, text, x, y, onStart, onStop)
         local button = Instance.new("TextButton")
@@ -634,7 +695,7 @@ local function createFreeCamTouchPad()
     return pad
 end
 
-local freeCamTouchPad = createFreeCamTouchPad()
+freeCamTouchPad = createFreeCamTouchPad()
 
 local function createSlider(parent, setting, min, max, default, step, suffix)
     step = step or 1
@@ -1184,7 +1245,8 @@ createColorPicker(bChams, "Weapon Cham Color", Color3.fromRGB(255, 255, 255))
 -- M5: FreeCam controls — missing from mobile but present in desktop + features.lua
 local _, bFreeCam = createCard(rPlayer, "Free Camera")
 createToggle(bFreeCam, "Free Cam Toggle", false, function(enabled)
-    freeCamTouchPad.Visible = enabled
+    freeCamEnabled = enabled
+    freeCamTouchPad.Visible = enabled or mobileLayoutEditing
 end)
 createSlider(bFreeCam, "FreeCam Speed", 1, 500, 150, 5, "")
 
@@ -1220,9 +1282,12 @@ local lSettings, rSettings = getCols("Settings")
 
 -- LEFT COLUMN
 local _, bMobileSet = createCard(lSettings, "Mobile Controls")
+createToggle(bMobileSet, "Edit Mobile Layout", false, setMobileLayoutEditing)
+_G.OnSlider("Mobile Control Scale", setMobileControlScale)
+createSlider(bMobileSet, "Mobile Control Scale", 0.7, 1.5, 1, 0.1, "x")
 local infoLbl = Instance.new("TextLabel")
 infoLbl.BackgroundTransparency = 1
-infoLbl.Text = "• Tap 'A' or press LB to toggle UI\n• Hold Toggle mode shows an aim button\n• Free Cam includes touch movement controls"
+infoLbl.Text = "• Enable Edit Mobile Layout to drag controls\n• Use the scale slider to resize them\n• Layout is saved with profiles"
 infoLbl.Size = UDim2.new(1, 0, 0, 62)
 infoLbl.TextSize = 11
 infoLbl.TextColor3 = THEME.TextMuted
@@ -1239,6 +1304,12 @@ end)
 createToggle(bClose, "Show Watermark", false, function(v)
     if _G.AtomwareConfig then _G.AtomwareConfig:SetWatermarkVisible(v) end
 end)
+createToggle(bClose, "Show FPS Counter", false, function(v)
+    if _G.AtomwareConfig then _G.AtomwareConfig:SetFPSCounterVisible(v) end
+end)
+createToggle(bClose, "Raid Alerts", false)
+createToggle(bClose, "Airdrop Alerts", false)
+createSlider(bClose, "Alert Duration", 1, 10, 3, 1, "s")
 createColorPicker(bClose, "Watermark Color", Color3.fromRGB(205, 104, 255), function(v)
     if _G.AtomwareConfig then _G.AtomwareConfig:SetWatermarkColor(v) end
 end)
