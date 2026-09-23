@@ -68,6 +68,9 @@ if not isAllowedGame then
             corner.Parent = message
 
             screen.Parent = parent
+            task.delay(1, function()
+                if screen.Parent then screen:Destroy() end
+            end)
         end)
     end
     return
