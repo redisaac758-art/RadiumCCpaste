@@ -5,7 +5,23 @@
 ]]
 
 local ALLOWED_PLACE_ID = 13253735473
-if game.PlaceId ~= ALLOWED_PLACE_ID then
+local isAllowedGame = game.PlaceId == ALLOWED_PLACE_ID or game.GameId == ALLOWED_PLACE_ID
+if not isAllowedGame then
+    if _G.AtomwareUnload and (_G.AtomwareUILoaded or _G.AtomwareFeaturesLoaded) then
+        pcall(_G.AtomwareUnload)
+    end
+
+    pcall(function()
+        local player = game:GetService("Players").LocalPlayer
+        local playerGui = player and player:FindFirstChildOfClass("PlayerGui")
+        if playerGui then
+            for _, name in ipairs({ "AtomwareUI", "AtomwareMobileUI" }) do
+                local existing = playerGui:FindFirstChild(name)
+                if existing then existing:Destroy() end
+            end
+        end
+    end)
+
     local parent
     pcall(function()
         if type(gethui) == "function" then
