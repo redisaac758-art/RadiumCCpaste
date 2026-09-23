@@ -7,6 +7,11 @@
 local UserInputService = game:GetService("UserInputService")
 local BASE_URL = "https://raw.githubusercontent.com/redisaac758-art/RadiumCCpaste/main/"
 
+-- If the initializer is run again, unload the previous UI/backend first.
+if _G.AtomwareUnload and (_G.AtomwareUILoaded or _G.AtomwareFeaturesLoaded) then
+    pcall(_G.AtomwareUnload)
+end
+
 -- Platform Detection
 -- TouchEnabled alone is the correct signal for mobile/tablet — a tablet with a
 -- Bluetooth keyboard or mouse still reports MouseEnabled/KeyboardEnabled as true,
@@ -38,6 +43,22 @@ local function loadRemote(path)
 end
 
 -- 1. Load Targeted Platform UI
+if not loadRemote("config.lua") then
+    warn("Atomware: shared configuration could not be loaded; startup aborted.")
+    return
+end
+
+_G.AtomwareUnload = function()
+    local player = game:GetService("Players").LocalPlayer
+    local playerGui = player and player:FindFirstChild("PlayerGui")
+    local gui = playerGui and (playerGui:FindFirstChild("AtomwareUI") or playerGui:FindFirstChild("AtomwareMobileUI"))
+    if _G.AtomwareConfig then
+        _G.AtomwareConfig:Unload(gui)
+    elseif gui then
+        gui:Destroy()
+    end
+end
+
 if not loadRemote(targetUIFile) then return end
 
 -- 2. Wait for UI hooks to initialize (timeout after 15 s)

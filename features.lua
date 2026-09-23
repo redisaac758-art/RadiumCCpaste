@@ -14,11 +14,37 @@ local SoundService = game:GetService("SoundService")
 local Debris = game:GetService("Debris")
 
 local LocalPlayer = Players.LocalPlayer
+
+local function trackConnection(connection)
+    if _G.AtomwareConfig then return _G.AtomwareConfig:TrackConnection(connection) end
+    return connection
+end
+local function trackTask(thread)
+    if _G.AtomwareConfig then return _G.AtomwareConfig:TrackTask(thread) end
+    return thread
+end
 local Camera = Workspace.CurrentCamera or Workspace:WaitForChild("Camera", 10)
 if not Camera then error("Atomware: CurrentCamera was unavailable after 10 seconds") end
-Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+local InitialCameraFOV = Camera.FieldOfView
+local WorldState = {
+    WaterColor = Workspace.Terrain.WaterColor,
+    WaterReflectance = Workspace.Terrain.WaterReflectance,
+    WaterWaveSpeed = Workspace.Terrain.WaterWaveSpeed,
+    WaterWaveSize = Workspace.Terrain.WaterWaveSize,
+    GlobalShadows = Lighting.GlobalShadows,
+    ExposureCompensation = Lighting.ExposureCompensation,
+    TreeLeaves = {},
+}
+local okCloudColor, cloudColor = pcall(function() return Workspace.Terrain.Clouds.Color end)
+local okCloudCover, cloudCover = pcall(function() return Workspace.Terrain.Clouds.Cover end)
+if okCloudColor then WorldState.CloudColor = cloudColor end
+if okCloudCover then WorldState.CloudCover = cloudCover end
+local terrainDecoration
+if gethiddenproperty then pcall(function() terrainDecoration = gethiddenproperty(Workspace.Terrain, "Decoration") end) end
+WorldState.Decoration = terrainDecoration
+trackConnection(Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
     if Workspace.CurrentCamera then Camera = Workspace.CurrentCamera end
-end)
+end))
 
 --//==================================================
 --// EVENT HOOK WAITER
@@ -111,7 +137,7 @@ end
 --       For keyboard/gamepad buttons, AimKey is a KeyCode (e.g. ButtonR2, E).
 --       We must check BOTH independently because gamepad input reports Gamepad1
 --       as UserInputType and the actual button (such as ButtonR2) as KeyCode.
-UserInputService.InputBegan:Connect(function(input, gpe)
+trackConnection(UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe and input.UserInputType ~= Enum.UserInputType.Gamepad1 then return end
     local keyMatch = (input.UserInputType == AimbotConfig.AimKey)
         or (input.KeyCode == AimbotConfig.AimKey)
@@ -123,9 +149,9 @@ UserInputService.InputBegan:Connect(function(input, gpe)
         -- "Controller Bind" and any other mode: hold-to-aim
         AimbotConfig.Active = true
     end
-end)
+end))
 
-UserInputService.InputEnded:Connect(function(input)
+trackConnection(UserInputService.InputEnded:Connect(function(input)
     local keyMatch = (input.UserInputType == AimbotConfig.AimKey)
         or (input.KeyCode == AimbotConfig.AimKey)
     if not keyMatch then return end
@@ -135,7 +161,7 @@ UserInputService.InputEnded:Connect(function(input)
         AimbotConfig.Active = false
     end
     -- "Hold Toggle" and "Always On" are unaffected by key release
-end)
+end))
 
 -- Mobile & Controller Global Aim Triggers
 _G.OnToggle("MobileAimTrigger", function(state)
@@ -155,7 +181,7 @@ _G.OnToggle("ControllerAimToggle", function()
     -- "Always On" needs no toggle — aim is driven by AimbotConfig.Enabled alone
 end)
 
-RunService.RenderStepped:Connect(function()
+trackConnection(RunService.RenderStepped:Connect(function()
     local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     FOVCircle.Position = viewportCenter
     FOVCircle.Radius = AimbotConfig.FOV
@@ -180,7 +206,7 @@ RunService.RenderStepped:Connect(function()
             end
         end
     end
-end)
+end))
 
 _G.OnToggle("Aimbot Enabled", function(s) AimbotConfig.Enabled = s end)
 _G.OnDropdown("Aimbot Mode", function(m) AimbotConfig.Mode = m end)
@@ -224,7 +250,7 @@ local function applyBigHead(model)
     end
 end
 
-task.spawn(function()
+trackTask(task.spawn(function()
     while true do
         if HeadSizeEnabled then
             for _, model in ipairs(Workspace:GetChildren()) do
@@ -235,7 +261,7 @@ task.spawn(function()
         end
         task.wait(1.5)
     end
-end)
+end))
 
 _G.OnToggle("Big Head", function(s)
     HeadSizeEnabled = s
@@ -370,25 +396,25 @@ local function registerESP(model)
         skeletonLines = skelLines
     }
 
-    model.Destroying:Connect(function()
+    trackConnection(model.Destroying:Connect(function()
         pcall(function() box:Remove() end)
         pcall(function() outline:Remove() end)
         pcall(function() txt:Remove() end)
         pcall(function() weaponTxt:Remove() end)
         for _, l in ipairs(skelLines) do pcall(function() l.line:Remove() end) end
         espCache[model] = nil
-    end)
+    end))
 end
 
 for _, m in ipairs(Workspace:GetChildren()) do
     if m:IsA("Model") then registerESP(m) end
 end
-Workspace.ChildAdded:Connect(function(c)
+trackConnection(Workspace.ChildAdded:Connect(function(c)
     if c:IsA("Model") then registerESP(c) end
-end)
+end))
 
 -- Ensure local player's character is never kept in espCache across respawns
-LocalPlayer.CharacterAdded:Connect(function(char)
+trackConnection(LocalPlayer.CharacterAdded:Connect(function(char)
     if espCache[char] then
         local d = espCache[char]
         pcall(function() d.box:Remove() end)
@@ -398,9 +424,9 @@ LocalPlayer.CharacterAdded:Connect(function(char)
         for _, l in ipairs(d.skeletonLines) do pcall(function() l.line:Remove() end) end
         espCache[char] = nil
     end
-end)
+end))
 
-task.spawn(function()
+trackTask(task.spawn(function()
     while true do
         for _, model in ipairs(Workspace:GetChildren()) do
             if model:IsA("Model") and not espCache[model] then registerESP(model) end
@@ -410,9 +436,9 @@ task.spawn(function()
         end
         task.wait(1.5)
     end
-end)
+end))
 
-RunService.RenderStepped:Connect(function()
+trackConnection(RunService.RenderStepped:Connect(function()
     if not ESP_Master then
         for _, d in pairs(espCache) do
             d.box.Visible = false
@@ -540,7 +566,7 @@ RunService.RenderStepped:Connect(function()
             end
         end
     end
-end)
+end))
 
 _G.OnToggle("Enable ESP", function(s) ESP_Master = s end)
 _G.OnToggle("Box Esp", function(s) ESP_Box = s end)
@@ -598,7 +624,7 @@ local function getClosestArmoredTarget()
     return closest
 end
 
-RunService.RenderStepped:Connect(function()
+trackConnection(RunService.RenderStepped:Connect(function()
     local viewCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     ArmorFOVCircle.Position = viewCenter
     ArmorFOVCircle.Radius = ArmorFOV_Radius
@@ -623,7 +649,7 @@ RunService.RenderStepped:Connect(function()
         end
     end
     ArmorSnapLine.Visible = false
-end)
+end))
 
 _G.OnToggle("Armor Esp", function(s) ArmorESP_Enabled = s end)
 _G.OnSlider("Fov Slider", function(v) ArmorFOV_Radius = v end)
@@ -756,20 +782,20 @@ local function refreshAllMat()
     for _, plr in ipairs(Players:GetPlayers()) do applyMatPlayer(plr) end
 end
 
-RunService.RenderStepped:Connect(function()
+trackConnection(RunService.RenderStepped:Connect(function()
     if not MatState.Enabled then return end
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and plr.Character then applyMatPlayer(plr) end
     end
-end)
+end))
 
-Players.PlayerAdded:Connect(function(plr)
-    plr.CharacterAdded:Connect(function()
+trackConnection(Players.PlayerAdded:Connect(function(plr)
+    trackConnection(plr.CharacterAdded:Connect(function()
         task.wait(0.3)
         if MatState.Enabled then applyMatPlayer(plr) end
-    end)
-end)
-Players.PlayerRemoving:Connect(function(plr) restoreMatPlayer(plr) end)
+    end))
+end))
+trackConnection(Players.PlayerRemoving:Connect(function(plr) restoreMatPlayer(plr) end))
 
 _G.OnToggle("Enable Material Chams", function(v) MatState.Enabled = v refreshAllMat() end)
 _G.OnDropdown("Chams Material", function(sel)
@@ -824,12 +850,12 @@ local function registerItem(m)
     if not anchor then return end
     local txt = makeESPText("Item", Color3.fromRGB(255, 215, 0))
     ItemCache[m] = { drawing = txt, part = anchor }
-    m.Destroying:Connect(function()
+    trackConnection(m.Destroying:Connect(function()
         if ItemCache[m] then
             pcall(function() ItemCache[m].drawing:Remove() end)
             ItemCache[m] = nil
         end
-    end)
+    end))
 end
 
 local function scanItems()
@@ -838,9 +864,9 @@ local function scanItems()
     end
 end
 
-Workspace.ChildAdded:Connect(function(c)
+trackConnection(Workspace.ChildAdded:Connect(function(c)
     if c:IsA("Model") then task.wait(0.05); registerItem(c) end
-end)
+end))
 
 -- ---- CORPSE ESP ----
 -- Corpses are models with exactly 2 BasePart children — one Fabric, one Metal.
@@ -860,12 +886,12 @@ local function registerCorpse(m)
     if not isCorpse(m) then return end
     local txt = makeESPText("Corpse", Color3.fromRGB(255, 75, 75))
     CorpseCache[m] = { drawing = txt, model = m }
-    m.Destroying:Connect(function()
+    trackConnection(m.Destroying:Connect(function()
         if CorpseCache[m] then
             pcall(function() CorpseCache[m].drawing:Remove() end)
             CorpseCache[m] = nil
         end
-    end)
+    end))
 end
 
 local function scanCorpses()
@@ -874,9 +900,9 @@ local function scanCorpses()
     end
 end
 
-Workspace.ChildAdded:Connect(function(c)
+trackConnection(Workspace.ChildAdded:Connect(function(c)
     if c:IsA("Model") then task.wait(0.05); registerCorpse(c) end
-end)
+end))
 
 -- ---- AIRDROP ESP ----
 -- Airdrops are models that contain a child named "Crates" or "Cables".
@@ -888,12 +914,12 @@ local function registerAirdrop(m)
     if not anchor then return end
     local txt = makeESPText("Airdrop", Color3.fromRGB(255, 255, 0))
     AirdropCache[m] = { drawing = txt, part = anchor }
-    m.Destroying:Connect(function()
+    trackConnection(m.Destroying:Connect(function()
         if AirdropCache[m] then
             pcall(function() AirdropCache[m].drawing:Remove() end)
             AirdropCache[m] = nil
         end
-    end)
+    end))
 end
 
 local function scanAirdrops()
@@ -902,28 +928,28 @@ local function scanAirdrops()
     end
 end
 
-Workspace.ChildAdded:Connect(function(c)
+trackConnection(Workspace.ChildAdded:Connect(function(c)
     if c:IsA("Model") then task.wait(0.05); registerAirdrop(c) end
-end)
+end))
 
 -- ---- RAID ESP ----
 -- Triggered by explosion sounds. Entries expire after 300 seconds.
 local hitSoundNames = { Explosion = true, Explosion_Muffled = true }
 local function registerSound(sound)
-    sound.Played:Connect(function()
+    trackConnection(sound.Played:Connect(function()
         if RaidESP_Enabled and sound.Parent and sound.Parent:IsA("BasePart") then
             local txt = makeESPText("Raid", Color3.fromRGB(255, 75, 125))
             table.insert(RaidCache, { text = txt, position = sound.Parent.Position, startTime = tick() })
         end
-    end)
+    end))
 end
 
 for _, desc in ipairs(Workspace:GetDescendants()) do
     if desc:IsA("Sound") and hitSoundNames[desc.Name] then registerSound(desc) end
 end
-Workspace.DescendantAdded:Connect(function(desc)
+trackConnection(Workspace.DescendantAdded:Connect(function(desc)
     if desc:IsA("Sound") and hitSoundNames[desc.Name] then registerSound(desc) end
-end)
+end))
 
 -- ---- TOGGLE HANDLERS ----
 _G.OnToggle("Item ESP", function(s)
@@ -963,7 +989,7 @@ end)
 
 -- ---- RENDER LOOP (all four in one connection) ----
 local worldESPScanElapsed = 0
-RunService.RenderStepped:Connect(function(dt)
+trackConnection(RunService.RenderStepped:Connect(function(dt)
     if ItemESP_Enabled or CorpseESP_Enabled or AirdropESP_Enabled then
         worldESPScanElapsed = worldESPScanElapsed + dt
         if worldESPScanElapsed >= 1 then
@@ -1045,7 +1071,7 @@ RunService.RenderStepped:Connect(function(dt)
     else
         for _, d in pairs(AirdropCache) do d.drawing.Visible = false end
     end
-end)
+end))
 --//==================================================
 --// ORE ESP
 --//==================================================
@@ -1102,15 +1128,15 @@ local function registerOre(m)
     txt.Visible = false
     oreCache[m] = { Text = txt, OreType = oType, Part = oPart }
     -- Clean up drawing when the ore model is destroyed
-    m.Destroying:Connect(function()
+    trackConnection(m.Destroying:Connect(function()
         if oreCache[m] then
             pcall(function() oreCache[m].Text:Remove() end)
             oreCache[m] = nil
         end
-    end)
+    end))
 end
 
-task.spawn(function()
+trackTask(task.spawn(function()
     while true do
         for _, m in ipairs(Workspace:GetChildren()) do
             if m:IsA("Model") then registerOre(m) end
@@ -1124,17 +1150,17 @@ task.spawn(function()
         end
         task.wait(2)
     end
-end)
+end))
 
 -- Register newly added workspace children as ores immediately
-Workspace.ChildAdded:Connect(function(c)
+trackConnection(Workspace.ChildAdded:Connect(function(c)
     if c:IsA("Model") then
         task.wait(0.1) -- brief wait for children to populate
         registerOre(c)
     end
-end)
+end))
 
-RunService.RenderStepped:Connect(function()
+trackConnection(RunService.RenderStepped:Connect(function()
     for model, d in pairs(oreCache) do
         if d.Part and d.Part.Parent then
             local dist = (Camera.CFrame.Position - d.Part.Position).Magnitude
@@ -1151,7 +1177,7 @@ RunService.RenderStepped:Connect(function()
             oreCache[model] = nil
         end
     end
-end)
+end))
 
 _G.OnToggle("Stone Esp", function(s) OreESPConfig.Stone = s end)
 _G.OnToggle("Iron Esp", function(s) OreESPConfig.Iron = s end)
@@ -1204,13 +1230,13 @@ local function registerVehicle(model)
             drawing.OutlineColor = Color3.new(0, 0, 0)
             drawing.Visible = false
             VehicleESP_Cache[model] = { Drawing = drawing, Name = name }
-            model.Destroying:Connect(function()
+            trackConnection(model.Destroying:Connect(function()
                 local entry = VehicleESP_Cache[model]
                 if entry then
                     pcall(function() entry.Drawing:Remove() end)
                     VehicleESP_Cache[model] = nil
                 end
-            end)
+            end))
             return
         end
     end
@@ -1221,12 +1247,12 @@ local function anyVehicleESPEnabled()
         or VehicleESP_Config.Helicopter or VehicleESP_Config.Trolly
 end
 
-Workspace.ChildAdded:Connect(function(child)
+trackConnection(Workspace.ChildAdded:Connect(function(child)
     if child:IsA("Model") then task.defer(registerVehicle, child) end
-end)
+end))
 
 local vehicleScanElapsed = 0
-RunService.RenderStepped:Connect(function(dt)
+trackConnection(RunService.RenderStepped:Connect(function(dt)
     if anyVehicleESPEnabled() then
         vehicleScanElapsed = vehicleScanElapsed + dt
         if vehicleScanElapsed >= 2 then
@@ -1257,7 +1283,7 @@ RunService.RenderStepped:Connect(function(dt)
             entry.Drawing.Visible = false
         end
     end
-end)
+end))
 
 _G.OnToggle("ATV", function(s) VehicleESP_Config.ATV = s end)
 _G.OnToggle("Boat", function(s) VehicleESP_Config.Boat = s end)
@@ -1320,8 +1346,17 @@ _G.OnToggle("Tree Leaves", function(s)
     local leafNames = { Fir3_Leaves = true, Elm1_Leaves = true, Birch1_Leaves = true }
     for _, desc in ipairs(Workspace:GetDescendants()) do
         if desc:IsA("BasePart") and leafNames[desc.Name] then
-            desc.Transparency = s and 0 or 1
-            desc.CanCollide = s
+            if not WorldState.TreeLeaves[desc] then
+                WorldState.TreeLeaves[desc] = { Transparency = desc.Transparency, CanCollide = desc.CanCollide }
+            end
+            if s then
+                desc.Transparency = 0
+                desc.CanCollide = true
+            else
+                local original = WorldState.TreeLeaves[desc]
+                desc.Transparency = original.Transparency
+                desc.CanCollide = original.CanCollide
+            end
         end
     end
 end)
@@ -1349,7 +1384,7 @@ _G.OnToggle("Bright Night", function(s)
         Lighting.ExposureCompensation = BrightNight_OriginalExposure
     end
 end)
-RunService.RenderStepped:Connect(function()
+trackConnection(RunService.RenderStepped:Connect(function()
     if not BrightNightEnabled then return end
     local hour = getBrightNightHour()
     local exposure = 0
@@ -1362,9 +1397,21 @@ RunService.RenderStepped:Connect(function()
         exposure = BrightNight_MaxExposure * math.min(duskFade, dawnFade)
     end
     Lighting.ExposureCompensation = exposure
-end)
+end))
 
-local stimEffect = Lighting:FindFirstChild("StimEffect") or Instance.new("ColorCorrectionEffect", Lighting)
+local existingStimEffect = Lighting:FindFirstChild("StimEffect")
+local stimEffectOriginal
+if existingStimEffect and existingStimEffect:IsA("ColorCorrectionEffect") then
+    stimEffectOriginal = {
+        TintColor = existingStimEffect.TintColor,
+        Brightness = existingStimEffect.Brightness,
+        Contrast = existingStimEffect.Contrast,
+        Saturation = existingStimEffect.Saturation,
+        Enabled = existingStimEffect.Enabled,
+    }
+end
+local stimEffect = existingStimEffect or Instance.new("ColorCorrectionEffect", Lighting)
+local createdStimEffect = existingStimEffect == nil
 stimEffect.Name = "StimEffect"
 stimEffect.Enabled = false
 
@@ -1429,18 +1476,18 @@ _G.OnKeybind("Zoom", function(keyName)
     end
 end)
 
-UserInputService.InputBegan:Connect(function(input, gpe)
+trackConnection(UserInputService.InputBegan:Connect(function(input, gpe)
     if not gpe and input.KeyCode == zoomKey then
         zoomKeyHeld = true
         updateZoomState()
     end
-end)
-UserInputService.InputEnded:Connect(function(input)
+end))
+trackConnection(UserInputService.InputEnded:Connect(function(input)
     if input.KeyCode == zoomKey then
         zoomKeyHeld = false
         updateZoomState()
     end
-end)
+end))
 
 local hitSoundAudioIds = {
     Default = "rbxassetid://9119561046", Rust = "rbxassetid://5043539486",
@@ -1543,19 +1590,19 @@ local fpsArmsFolder = Workspace:FindFirstChild("Const")
     and Workspace.Const.Ignore:FindFirstChild("FPSArms")
 
 if fpsArmsFolder then
-    fpsArmsFolder.ChildAdded:Connect(function()
+    trackConnection(fpsArmsFolder.ChildAdded:Connect(function()
         task.wait(0.2)
         armRecacheOriginals()
         if ArmChams.Enabled then armApply() end
-    end)
-    fpsArmsFolder.ChildRemoved:Connect(function()
+    end))
+    trackConnection(fpsArmsFolder.ChildRemoved:Connect(function()
         task.wait(0.1)
         armRecacheOriginals()
-    end)
+    end))
 end
 
 -- Heartbeat loop keeps chams applied even when game scripts try to reset material
-RunService.Heartbeat:Connect(function()
+trackConnection(RunService.Heartbeat:Connect(function()
     if not ArmChams.Enabled then return end
     local mat = pcall(function() return Enum.Material[ArmChams.Material] end)
         and Enum.Material[ArmChams.Material] or Enum.Material.ForceField
@@ -1565,7 +1612,7 @@ RunService.Heartbeat:Connect(function()
             p.Color    = ArmChams.Color
         end
     end
-end)
+end))
 
 armRecacheOriginals()
 
@@ -1649,11 +1696,11 @@ end
 
 -- Re-apply when a new weapon model is loaded into HandModels
 if HandModelsFolder then
-    HandModelsFolder.ChildAdded:Connect(function()
+    trackConnection(HandModelsFolder.ChildAdded:Connect(function()
         task.wait(0.5)
         weaponRecacheOriginals()
         if WeaponChams.Enabled then weaponApply() end
-    end)
+    end))
 end
 
 weaponRecacheOriginals()
@@ -1716,7 +1763,7 @@ local function createTracer(proj)
 
     local lastPos = proj.Position or proj.CFrame.Position
     local conn
-    conn = RunService.RenderStepped:Connect(function()
+    conn = trackConnection(RunService.RenderStepped:Connect(function()
         if not TracerBullet.Enabled or not proj or not proj.Parent then
             conn:Disconnect()
             return
@@ -1745,10 +1792,10 @@ local function createTracer(proj)
             Debris:AddItem(beam, TracerBullet.Lifetime)
         end
         lastPos = currentPos
-    end)
+    end))
 end
 
-Workspace.DescendantAdded:Connect(function(desc)
+trackConnection(Workspace.DescendantAdded:Connect(function(desc)
     if desc:IsDescendantOf(ReplicatedStorage) then return end
     task.wait()  -- one frame for position to initialise
     if not TracerBullet.Enabled then return end
@@ -1761,7 +1808,7 @@ Workspace.DescendantAdded:Connect(function(desc)
     if desc.Name == "Arrow" and not isLocalArrow(desc) then
         createTracer(desc)
     end
-end)
+end))
 
 _G.OnToggle("Bullet Trail", function(s) TracerBullet.Enabled = s end)
 _G.OnColorPicker("Bullet Trail Color", function(c) TracerBullet.Color = c end)
@@ -1867,7 +1914,7 @@ local function checkHitSound(obj)
         showHitmarker()
     end
 end
-Workspace.DescendantAdded:Connect(checkHitSound)
+trackConnection(Workspace.DescendantAdded:Connect(checkHitSound))
 
 -- Bonus trigger: hookfunction so we catch sounds that were already in the tree
 -- Wrapped in pcall — silently skipped if executor doesn't support hookfunction
@@ -1883,7 +1930,7 @@ pcall(function()
 end)
 
 -- RenderStepped: expire the hitmarker and keep colour/thickness live
-RunService.RenderStepped:Connect(function()
+trackConnection(RunService.RenderStepped:Connect(function()
     if HitmarkerConfig.Active
         and tick() - HitmarkerConfig.Timer > HitmarkerConfig.Duration then
         HitmarkerConfig.Active = false
@@ -1895,7 +1942,7 @@ RunService.RenderStepped:Connect(function()
         line.Color     = HitmarkerConfig.Color
         line.Thickness = HitmarkerConfig.Thickness
     end
-end)
+end))
 
 _G.OnToggle("Hitmarker Enabled", function(s) HitmarkerConfig.Enabled = s end)
 _G.OnColorPicker("Hitmarker Color", function(c) HitmarkerConfig.Color = c end)
@@ -1981,7 +2028,7 @@ local function createOHForModel(model)
 end
 
 -- Keep fake part welded to HumanoidRootPart every frame
-RunService.Heartbeat:Connect(function()
+trackConnection(RunService.Heartbeat:Connect(function()
     if not OverrideHitbox.Enabled then return end
     for _, p in ipairs(OverrideHitboxParts) do
         if p and p.Parent then
@@ -1991,10 +2038,10 @@ RunService.Heartbeat:Connect(function()
             end
         end
     end
-end)
+end))
 
 -- Scan loop: create for new models while enabled
-task.spawn(function()
+trackTask(task.spawn(function()
     while true do
         task.wait(0.5)
         if OverrideHitbox.Enabled then
@@ -2003,17 +2050,17 @@ task.spawn(function()
             end
         end
     end
-end)
+end))
 
-Workspace.ChildAdded:Connect(function(child)
+trackConnection(Workspace.ChildAdded:Connect(function(child)
     if OverrideHitbox.Enabled and isOHCandidate(child) then
         task.wait(0.1)
         createOHForModel(child)
     end
-end)
-Workspace.ChildRemoved:Connect(function(child)
+end))
+trackConnection(Workspace.ChildRemoved:Connect(function(child)
     if child:IsA("Model") then removeOHFromModel(child) end
-end)
+end))
 
 _G.OnToggle("Override Hitbox", function(s)
     OverrideHitbox.Enabled = s
@@ -2043,15 +2090,16 @@ _G.OnDropdown("OH Material", function(v) OverrideHitbox.Material = v end)
 --//==================================================
 
 local ForceHeadshots = { Enabled = false }
+_G.AtomwareForceHeadshots = false
 
-task.spawn(function()
+trackTask(task.spawn(function()
+    if _G.AtomwareRemoteHookInstalled then return end
     pcall(function()
-        local oldFireServer
-        oldFireServer = hookfunction(
+        _G.AtomwareOriginalFireServer = hookfunction(
             Instance.new("RemoteEvent").FireServer,
             newcclosure(function(self, ...)
                 local args = { ... }
-                if ForceHeadshots.Enabled then
+                if _G.AtomwareForceHeadshots then
                     for _, v in pairs(args) do
                         if type(v) == "table" then
                             for _, val in pairs(v) do
@@ -2082,13 +2130,17 @@ task.spawn(function()
                         end
                     end
                 end
-                return oldFireServer(self, ...)
+                return _G.AtomwareOriginalFireServer(self, ...)
             end)
         )
+        _G.AtomwareRemoteHookInstalled = true
     end)
-end)
+end))
 
-_G.OnToggle("Force Headshots", function(s) ForceHeadshots.Enabled = s end)
+_G.OnToggle("Force Headshots", function(s)
+    ForceHeadshots.Enabled = s
+    _G.AtomwareForceHeadshots = s
+end)
 
 --//==================================================
 --// LONG NECK
@@ -2213,7 +2265,7 @@ local function setFreeCam(state)
     end
 end
 
-LocalPlayer.CharacterAdded:Connect(function(character)
+trackConnection(LocalPlayer.CharacterAdded:Connect(function(character)
     if not FreeCamEnabled then return end
     task.wait()
     local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -2224,7 +2276,7 @@ LocalPlayer.CharacterAdded:Connect(function(character)
         humanoid.JumpPower = 0
     end
     if Camera then Camera.CameraType = Enum.CameraType.Scriptable end
-end)
+end))
 
 _G.OnToggle("Free Cam Pressed", function() setFreeCam(not FreeCamEnabled) end)
 _G.OnToggle("Free Cam Toggle", setFreeCam)
@@ -2240,12 +2292,83 @@ end)
 
 _G.OnSlider("FreeCam Speed", function(v) FreeCamSpeed = v end)
 
-UserInputService.InputBegan:Connect(function(input, gpe)
+trackConnection(UserInputService.InputBegan:Connect(function(input, gpe)
     if not gpe then activeKeys[input.KeyCode] = true end
-end)
-UserInputService.InputEnded:Connect(function(input)
+end))
+trackConnection(UserInputService.InputEnded:Connect(function(input)
     activeKeys[input.KeyCode] = nil
-end)
+end))
+
+if _G.AtomwareConfig then
+    _G.AtomwareConfig:OnUnload(function()
+        pcall(setFreeCam, false)
+        pcall(setXRay, false)
+        pcall(longNeckApply, false)
+        if ArmChams.Enabled then pcall(armRestore) end
+        if WeaponChams.Enabled then pcall(weaponRestore) end
+        pcall(restoreAllMat)
+        pcall(function()
+            local skyHandler = _G.AtomwareEvents and _G.AtomwareEvents["Sky Changer"]
+            if skyHandler then skyHandler("Default") end
+        end)
+
+        pcall(function()
+            Workspace.Terrain.WaterColor = WorldState.WaterColor
+            Workspace.Terrain.WaterReflectance = WorldState.WaterReflectance
+            Workspace.Terrain.WaterWaveSpeed = WorldState.WaterWaveSpeed
+            Workspace.Terrain.WaterWaveSize = WorldState.WaterWaveSize
+            Lighting.GlobalShadows = WorldState.GlobalShadows
+            Lighting.ExposureCompensation = WorldState.ExposureCompensation
+            if WorldState.CloudColor then Workspace.Terrain.Clouds.Color = WorldState.CloudColor end
+            if WorldState.CloudCover then Workspace.Terrain.Clouds.Cover = WorldState.CloudCover end
+            if WorldState.Decoration ~= nil and sethiddenproperty then
+                pcall(function() sethiddenproperty(Workspace.Terrain, "Decoration", WorldState.Decoration) end)
+            end
+            for part, original in pairs(WorldState.TreeLeaves) do
+                if part and part.Parent then
+                    part.Transparency = original.Transparency
+                    part.CanCollide = original.CanCollide
+                end
+            end
+        end)
+
+        pcall(function()
+            if Camera and Camera.Parent then Camera.FieldOfView = InitialCameraFOV end
+            RunService:UnbindFromRenderStep("FreeCam")
+        end)
+        pcall(function()
+            if createdStimEffect then
+                stimEffect:Destroy()
+            elseif stimEffectOriginal and stimEffect.Parent then
+                stimEffect.TintColor = stimEffectOriginal.TintColor
+                stimEffect.Brightness = stimEffectOriginal.Brightness
+                stimEffect.Contrast = stimEffectOriginal.Contrast
+                stimEffect.Saturation = stimEffectOriginal.Saturation
+                stimEffect.Enabled = stimEffectOriginal.Enabled
+            end
+        end)
+
+        local seen = {}
+        local function removeDrawings(value)
+            if type(value) ~= "table" or seen[value] then return end
+            seen[value] = true
+            for _, child in pairs(value) do
+                if type(child) == "table" then
+                    removeDrawings(child)
+                elseif typeof(child) == "userdata" then
+                    pcall(function() child:Remove() end)
+                end
+            end
+        end
+        for _, cache in ipairs({ espCache, ItemCache, CorpseCache, RaidCache, AirdropCache, oreCache, VehicleESP_Cache }) do
+            removeDrawings(cache)
+            table.clear(cache)
+        end
+        table.clear(originalTransparencies)
+        table.clear(originalHeadStats)
+        table.clear(WorldState.TreeLeaves)
+    end)
+end
 
 _G.AtomwareFeaturesLoaded = true
 print("Good to go")

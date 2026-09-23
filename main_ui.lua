@@ -11,6 +11,11 @@ local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 
+local function trackConnection(connection)
+    if _G.AtomwareConfig then return _G.AtomwareConfig:TrackConnection(connection) end
+    return connection
+end
+
 --//==================================================
 --// GLOBAL EVENT BINDING SYSTEM
 --//==================================================
@@ -48,11 +53,19 @@ _G.OnKeybind = function(name, callback)
 end
 
 _G.FireEvent = function(name, ...)
+    if _G.AtomwareConfig and select("#", ...) == 1 then
+        _G.AtomwareConfig:Store(name, (...))
+    end
     local callback = _G.AtomwareEvents[name]
     if callback then task.spawn(callback, ...); return end
     local args = { ... }
     args.n = select("#", ...)
     _G.AtomwarePendingEvents[name] = args
+end
+
+local function bindSetting(name, default, apply, validate)
+    if _G.AtomwareConfig then return _G.AtomwareConfig:Register(name, default, apply, validate) end
+    return default
 end
 
 --//==================================================
@@ -128,7 +141,10 @@ ScreenGui.DisplayOrder = 100
 
 local playerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
 if not playerGui then error("Atomware: PlayerGui was unavailable after 10 seconds") end
+local existingGui = playerGui:FindFirstChild("AtomwareUI")
+if existingGui then existingGui:Destroy() end
 ScreenGui.Parent = playerGui
+if _G.AtomwareConfig then _G.AtomwareConfig:AttachUI(ScreenGui, "PC") end
 
 --//==================================================
 --// MAIN WINDOW CONTAINER
@@ -179,12 +195,12 @@ local function beginDrag(input)
     dragging = true
     dragStart = input.Position
     startPos = MainFrame.Position
-    input.Changed:Connect(function()
+    trackConnection(input.Changed:Connect(function()
         if input.UserInputState == Enum.UserInputState.End then dragging = false end
-    end)
+    end))
 end
 
-UserInputService.InputChanged:Connect(function(input)
+trackConnection(UserInputService.InputChanged:Connect(function(input)
     if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
         local delta = input.Position - dragStart
         MainFrame.Position = UDim2.new(
@@ -192,7 +208,7 @@ UserInputService.InputChanged:Connect(function(input)
             startPos.Y.Scale, startPos.Y.Offset + delta.Y
         )
     end
-end)
+end))
 
 -- Fixed Header (Never Scrolls)
 local Header = Instance.new("Frame")
@@ -203,11 +219,11 @@ Header.BorderSizePixel = 0
 Header.Parent = MainFrame
 stroke(Header, THEME.BorderDim, 1)
 
-Header.InputBegan:Connect(function(input)
+trackConnection(Header.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         beginDrag(input)
     end
-end)
+end))
 
 local HeaderAccent = Instance.new("Frame")
 HeaderAccent.Size = UDim2.fromOffset(4, 26)
@@ -241,7 +257,7 @@ CloseBtn.AutoButtonColor = false
 CloseBtn.Parent = Header
 corner(CloseBtn, 6)
 stroke(CloseBtn, THEME.BorderDim, 1)
-CloseBtn.MouseButton1Click:Connect(function() setUIVisible(false) end)
+trackConnection(CloseBtn.MouseButton1Click:Connect(function() setUIVisible(false) end))
 
 local MinBtn = Instance.new("TextButton")
 MinBtn.Size = UDim2.fromOffset(32, 28)
@@ -255,7 +271,7 @@ MinBtn.AutoButtonColor = false
 MinBtn.Parent = Header
 corner(MinBtn, 6)
 stroke(MinBtn, THEME.BorderDim, 1)
-MinBtn.MouseButton1Click:Connect(function() setUIVisible(false) end)
+trackConnection(MinBtn.MouseButton1Click:Connect(function() setUIVisible(false) end))
 
 -- Fixed Left Sidebar (Never Scrolls)
 local Sidebar = Instance.new("Frame")
@@ -417,7 +433,7 @@ local function createCard(parent, title)
     return card, body
 end
 
-local function createToggle(parent, setting, defaultState)
+local function createToggle(parent, setting, defaultState, onChange)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, 28)
     row.BackgroundTransparency = 1
@@ -451,27 +467,24 @@ local function createToggle(parent, setting, defaultState)
     corner(knob, 7)
 
     local state = defaultState
-    local function fire(v)
-        _G.FireEvent(setting, v)
-    end
-
-    btn.MouseButton1Click:Connect(function()
-        state = not state
+    local function apply(v)
+        if type(v) ~= "boolean" then return end
+        state = v
         tween(btn, TweenInfo.new(0.14), { BackgroundColor3 = state and THEME.Accent or THEME.CardAlt })
         tween(knob, TweenInfo.new(0.14), { Position = state and UDim2.new(1, -17, 0.5, -7) or UDim2.fromOffset(3, 3) })
-        fire(state)
-    end)
+        _G.FireEvent(setting, state)
+        if onChange then onChange(state) end
+    end
+    state = bindSetting(setting, defaultState, apply, function(v) return type(v) == "boolean" end)
+    apply(state)
 
-    task.defer(function() fire(defaultState) end)
+    trackConnection(btn.MouseButton1Click:Connect(function()
+        apply(not state)
+    end))
 
     table.insert(InteractiveElements, {
         Frame = row,
-        Action = function()
-            state = not state
-            tween(btn, TweenInfo.new(0.14), { BackgroundColor3 = state and THEME.Accent or THEME.CardAlt })
-            tween(knob, TweenInfo.new(0.14), { Position = state and UDim2.new(1, -17, 0.5, -7) or UDim2.fromOffset(3, 3) })
-            fire(state)
-        end
+        Action = function() apply(not state) end
     })
 
     return row
@@ -533,59 +546,51 @@ local function createSlider(parent, setting, min, max, default, step, suffix)
     local val = default
     local dragging = false
 
-    local function update(inputPos)
-        local relX = math.clamp((inputPos.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
-        local raw = min + (relX * (max - min))
-        val = math.floor(raw / step + 0.5) * step
-        val = math.clamp(val, min, max)
-
+    local function apply(value)
+        if type(value) ~= "number" then return end
+        val = math.clamp(math.floor(value / step + 0.5) * step, min, max)
         local pct = (val - min) / (max - min)
         fill.Size = UDim2.new(pct, 0, 1, 0)
         knob.Position = UDim2.new(pct, 0, 0.5, 0)
         valLbl.Text = tostring(val) .. suffix
-
         _G.FireEvent(setting, val)
     end
+    val = bindSetting(setting, default, apply, function(v) return type(v) == "number" and v >= min and v <= max end)
+    apply(val)
 
-    row.InputBegan:Connect(function(input)
+    local function update(inputPos)
+        local relX = math.clamp((inputPos.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+        apply(min + (relX * (max - min)))
+    end
+
+    trackConnection(row.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
             update(input.Position)
         end
-    end)
+    end))
 
-    UserInputService.InputChanged:Connect(function(input)
+    trackConnection(UserInputService.InputChanged:Connect(function(input)
         if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
             update(input.Position)
         end
-    end)
+    end))
 
-    UserInputService.InputEnded:Connect(function(input)
+    trackConnection(UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = false
         end
-    end)
-
-    task.defer(function()
-        _G.FireEvent(setting, val)
-    end)
+    end))
 
     table.insert(InteractiveElements, {
         Frame = row,
-        Adjust = function(delta)
-            val = math.clamp(val + (delta * step), min, max)
-            local pct = (val - min) / (max - min)
-            fill.Size = UDim2.new(pct, 0, 1, 0)
-            knob.Position = UDim2.new(pct, 0, 0.5, 0)
-            valLbl.Text = tostring(val) .. suffix
-            _G.FireEvent(setting, val)
-        end
+        Adjust = function(delta) apply(val + (delta * step)) end
     })
 
     return row
 end
 
-local function createDropdown(parent, setting, options, default)
+local function createDropdown(parent, setting, options, default, onChange)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, 50)
     row.BackgroundTransparency = 1
@@ -648,7 +653,19 @@ local function createDropdown(parent, setting, options, default)
         arrow.Text = open and "▲" or "▼"
     end
 
-    btn.MouseButton1Click:Connect(toggle)
+    trackConnection(btn.MouseButton1Click:Connect(toggle))
+
+    local optionButtons = {}
+    local function apply(value)
+        if not table.find(options, value) then return end
+        selected = value
+        btn.Text = "  " .. tostring(selected)
+        for _, optionButton in ipairs(optionButtons) do
+            optionButton.TextColor3 = optionButton.Text == "  " .. tostring(selected) and THEME.AccentBright or THEME.TextMuted
+        end
+        _G.FireEvent(setting, selected)
+        if onChange then onChange(selected) end
+    end
 
     for _, opt in ipairs(options) do
         local optBtn = Instance.new("TextButton")
@@ -662,29 +679,22 @@ local function createDropdown(parent, setting, options, default)
         optBtn.ZIndex = 81
         optBtn.Parent = dropFrame
         corner(optBtn, 4)
+        table.insert(optionButtons, optBtn)
 
-        optBtn.MouseButton1Click:Connect(function()
-            selected = opt
-            btn.Text = "  " .. tostring(opt)
+        trackConnection(optBtn.MouseButton1Click:Connect(function()
+            apply(opt)
             toggle()
-            for _, c in ipairs(dropFrame:GetChildren()) do
-                if c:IsA("TextButton") then
-                    c.TextColor3 = (c.Text == "  " .. tostring(selected)) and THEME.AccentBright or THEME.TextMuted
-                end
-            end
-            _G.FireEvent(setting, selected)
-        end)
+        end))
     end
 
-    task.defer(function()
-        _G.FireEvent(setting, selected)
-    end)
+    selected = bindSetting(setting, selected, apply, function(v) return table.find(options, v) ~= nil end)
+    apply(selected)
 
     table.insert(InteractiveElements, { Frame = row, Action = toggle })
     return row
 end
 
-local function createColorPicker(parent, setting, defaultColor)
+local function createColorPicker(parent, setting, defaultColor, onChange)
     defaultColor = defaultColor or Color3.fromRGB(157, 48, 255)
 
     local row = Instance.new("Frame")
@@ -736,10 +746,18 @@ local function createColorPicker(parent, setting, defaultColor)
     grid.Parent = popover
 
     local open = false
-    preview.MouseButton1Click:Connect(function()
+    local function apply(value)
+        if typeof(value) ~= "Color3" then return end
+        preview.BackgroundColor3 = value
+        _G.FireEvent(setting, value)
+        if onChange then onChange(value) end
+    end
+    defaultColor = bindSetting(setting, defaultColor, apply, function(v) return typeof(v) == "Color3" end)
+    apply(defaultColor)
+    trackConnection(preview.MouseButton1Click:Connect(function()
         open = not open
         popover.Visible = open
-    end)
+    end))
 
     for _, col in ipairs(palette) do
         local pBtn = Instance.new("TextButton")
@@ -748,20 +766,17 @@ local function createColorPicker(parent, setting, defaultColor)
         pBtn.ZIndex = 91
         pBtn.Parent = popover
         corner(pBtn, 4)
-        pBtn.MouseButton1Click:Connect(function()
-            preview.BackgroundColor3 = col
+        trackConnection(pBtn.MouseButton1Click:Connect(function()
             open = false
             popover.Visible = false
-            _G.FireEvent(setting, col)
-        end)
+            apply(col)
+        end))
     end
 
     table.insert(InteractiveElements, {
         Frame = row,
         Action = function() open = not open popover.Visible = open end
     })
-
-    task.defer(function() _G.FireEvent(setting, defaultColor) end)
 
     return row
 end
@@ -809,14 +824,27 @@ local function createKeybind(parent, setting, defaultKey)
         end
     end
     local actionKeybind = setting == "Xray" or setting == "Free Cam"
-    if not actionKeybind then task.defer(function() _G.FireEvent(setting, defaultKey) end) end
-    btn.MouseButton1Click:Connect(function()
+    local function apply(keyName)
+        if type(keyName) ~= "string" or keyName == "" then return end
+        boundKey = keyName
+        boundInputType = nil
+        for _, inputType in ipairs(Enum.UserInputType:GetEnumItems()) do
+            if inputType.Name == keyName then boundInputType = inputType break end
+        end
+        btn.Text = keyName
+        if not actionKeybind then _G.FireEvent(setting, keyName) end
+        if _G.AtomwareConfig then _G.AtomwareConfig:Refresh() end
+    end
+    boundKey = bindSetting(setting, boundKey, apply, function(v) return type(v) == "string" and #v > 0 end)
+    apply(boundKey)
+    if _G.AtomwareConfig then _G.AtomwareConfig:RegisterKeybind(setting, function() return boundKey end) end
+    trackConnection(btn.MouseButton1Click:Connect(function()
         listening = true
         btn.Text = "..."
         btn.TextColor3 = THEME.Red
-    end)
+    end))
 
-    UserInputService.InputBegan:Connect(function(input, gpe)
+    trackConnection(UserInputService.InputBegan:Connect(function(input, gpe)
         if listening then
             if input.UserInputType == Enum.UserInputType.Keyboard
                 or input.UserInputType == Enum.UserInputType.Gamepad1
@@ -826,17 +854,14 @@ local function createKeybind(parent, setting, defaultKey)
                     or input.UserInputType == Enum.UserInputType.MouseButton2
                 local kName = isButtonInput and input.UserInputType.Name or input.KeyCode.Name
                 listening = false
-                boundKey = kName
-                boundInputType = isButtonInput and input.UserInputType or nil
-                btn.Text = kName
                 btn.TextColor3 = THEME.AccentBright
-                if not actionKeybind then _G.FireEvent(setting, kName) end
+                apply(kName)
             end
         elseif (not gpe or input.UserInputType == Enum.UserInputType.Gamepad1) and boundKey ~= "None"
             and (input.KeyCode.Name == boundKey or input.UserInputType == boundInputType) then
             _G.FireEvent(setting .. " Pressed")
         end
-    end)
+    end))
 
     table.insert(InteractiveElements, {
         Frame = row,
@@ -876,7 +901,7 @@ for i, t in ipairs(tabsData) do
     stroke(btn, THEME.BorderDim, 1)
 
     TabButtons[pName] = btn
-    btn.MouseButton1Click:Connect(function() switchPage(pName) end)
+    trackConnection(btn.MouseButton1Click:Connect(function() switchPage(pName) end))
 end
 
 -- ---------------------------------------------------
@@ -1064,17 +1089,75 @@ local _, bUISet = createCard(pSettings, "Menu Settings")
 -- U3: pass the keybind name through OnKeybind so changing the key in the UI
 --     actually updates menuToggleKey and takes effect immediately.
 createKeybind(bUISet, "Toggle Menu Key", "Insert")
+createToggle(bUISet, "Show Keybind List", false, function(v)
+    if _G.AtomwareConfig then _G.AtomwareConfig:SetKeybindListVisible(v) end
+end)
+createToggle(bUISet, "Show Watermark", false, function(v)
+    if _G.AtomwareConfig then _G.AtomwareConfig:SetWatermarkVisible(v) end
+end)
+createColorPicker(bUISet, "Watermark Color", Color3.fromRGB(205, 104, 255), function(v)
+    if _G.AtomwareConfig then _G.AtomwareConfig:SetWatermarkColor(v) end
+end)
+createDropdown(bUISet, "Notification Corner", { "TopRight", "TopLeft", "BottomRight", "BottomLeft" }, "TopRight", function(v)
+    if _G.AtomwareConfig then _G.AtomwareConfig:SetNotificationCorner(v) end
+end)
+createToggle(bUISet, "Use Custom Cursor", false, function(v)
+    if _G.AtomwareConfig then _G.AtomwareConfig:SetCustomCursorVisible(v) end
+end)
 
 local destBtn = Instance.new("TextButton")
 destBtn.Size = UDim2.new(1, 0, 0, 36)
 destBtn.BackgroundColor3 = Color3.fromRGB(70, 20, 35)
-destBtn.Text = "Close Atomware UI"
+destBtn.Text = "Unload Atomware"
 destBtn.TextColor3 = THEME.Red
 destBtn.TextSize = 12
 destBtn.Font = FONT_BOLD
 destBtn.Parent = bUISet
 corner(destBtn, 6)
-destBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+trackConnection(destBtn.MouseButton1Click:Connect(function()
+    if _G.AtomwareUnload then _G.AtomwareUnload() else ScreenGui:Destroy() end
+end))
+
+local _, bProfiles = createCard(pSettings, "Profiles")
+local profileName = Instance.new("TextBox")
+profileName.Size = UDim2.new(1, 0, 0, 30)
+profileName.BackgroundColor3 = THEME.CardAlt
+profileName.TextColor3 = THEME.Text
+profileName.PlaceholderColor3 = THEME.TextDim
+profileName.PlaceholderText = "Profile name"
+profileName.Text = (_G.AtomwareConfig and _G.AtomwareConfig.Profile) or "Default"
+profileName.ClearTextOnFocus = false
+profileName.TextSize = 11
+profileName.Font = FONT
+profileName.Parent = bProfiles
+corner(profileName, 6)
+
+local function makeProfileButton(text, callback)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, 0, 0, 30)
+    button.BackgroundColor3 = THEME.CardAlt
+    button.Text = text
+    button.TextColor3 = THEME.AccentBright
+    button.TextSize = 11
+    button.Font = FONT_BOLD
+    button.AutoButtonColor = false
+    button.Parent = bProfiles
+    corner(button, 6)
+    trackConnection(button.MouseButton1Click:Connect(callback))
+end
+
+makeProfileButton("Save Profile", function()
+    local ok, message = _G.AtomwareConfig:Save(profileName.Text)
+    _G.AtomwareConfig:Notify(ok and "Profile saved." or (message or "Profile save failed."))
+end)
+makeProfileButton("Load Profile", function()
+    local ok, message = _G.AtomwareConfig:Load(profileName.Text)
+    _G.AtomwareConfig:Notify(ok and "Profile loaded." or (message or "Profile load failed."))
+end)
+makeProfileButton("Use at Startup", function()
+    local ok, message = _G.AtomwareConfig:SetAutoload(profileName.Text)
+    _G.AtomwareConfig:Notify(ok and "Startup profile set." or (message or "Could not set startup profile."))
+end)
 
 switchPage("Visuals")
 
@@ -1112,7 +1195,7 @@ local function updateControllerNav()
     end
 end
 
-UserInputService.InputBegan:Connect(function(input, gpe)
+trackConnection(UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe and input.UserInputType ~= Enum.UserInputType.Gamepad1 then return end
 
     if input.UserInputType == Enum.UserInputType.Gamepad1 then
@@ -1151,7 +1234,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
     elseif input.KeyCode == menuToggleKey then
         setUIVisible(not UIVisible)
     end
-end)
+end))
 
 _G.AtomwareUILoaded = true
 print("Good to go")
