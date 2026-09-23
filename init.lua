@@ -48,8 +48,8 @@ if not isAllowedGame then
             message.AnchorPoint = Vector2.new(0.5, 0.5)
             message.Position = UDim2.fromScale(0.5, 0.5)
             message.Size = UDim2.new(0.8, 0, 0, 64)
-            message.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
-            message.BackgroundTransparency = 0.05
+            message.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+            message.BackgroundTransparency = 0
             message.BorderSizePixel = 0
             message.Text = "Atomware does not support the game you're in."
             message.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -57,6 +57,11 @@ if not isAllowedGame then
             message.TextWrapped = true
             message.Font = Enum.Font.GothamMedium
             message.Parent = screen
+
+            local sizeLimit = Instance.new("UISizeConstraint")
+            sizeLimit.MinSize = Vector2.new(240, 64)
+            sizeLimit.MaxSize = Vector2.new(420, 64)
+            sizeLimit.Parent = message
 
             local corner = Instance.new("UICorner")
             corner.CornerRadius = UDim.new(0, 10)
