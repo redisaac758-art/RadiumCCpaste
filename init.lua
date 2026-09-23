@@ -6,7 +6,49 @@
 
 local ALLOWED_PLACE_ID = 13253735473
 if game.PlaceId ~= ALLOWED_PLACE_ID then
-    warn("Atomware: this script only runs in the allowed game (PlaceId " .. ALLOWED_PLACE_ID .. ").")
+    local parent
+    pcall(function()
+        if type(gethui) == "function" then
+            parent = gethui()
+        else
+            local player = game:GetService("Players").LocalPlayer
+            parent = player and player:FindFirstChildOfClass("PlayerGui")
+        end
+    end)
+
+    if parent then
+        pcall(function()
+            local existing = parent:FindFirstChild("AtomwareUnsupportedNotice")
+            if existing then existing:Destroy() end
+
+            local screen = Instance.new("ScreenGui")
+            screen.Name = "AtomwareUnsupportedNotice"
+            screen.ResetOnSpawn = false
+            screen.IgnoreGuiInset = true
+            screen.DisplayOrder = 10000
+
+            local message = Instance.new("TextLabel")
+            message.Name = "Message"
+            message.AnchorPoint = Vector2.new(0.5, 0.5)
+            message.Position = UDim2.fromScale(0.5, 0.5)
+            message.Size = UDim2.new(0.8, 0, 0, 64)
+            message.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
+            message.BackgroundTransparency = 0.05
+            message.BorderSizePixel = 0
+            message.Text = "Atomware does not support the game you're in."
+            message.TextColor3 = Color3.fromRGB(255, 255, 255)
+            message.TextSize = 18
+            message.TextWrapped = true
+            message.Font = Enum.Font.GothamMedium
+            message.Parent = screen
+
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0, 10)
+            corner.Parent = message
+
+            screen.Parent = parent
+        end)
+    end
     return
 end
 
