@@ -135,7 +135,10 @@ _G.AtomwareUnload = function()
     end
 end
 
-if not loadRemote(targetUIFile) then return end
+if not loadRemote(targetUIFile) then
+    if _G.AtomwareUnload then pcall(_G.AtomwareUnload) end
+    return
+end
 
 -- 2. Wait for UI hooks to initialize (timeout after 15 s)
 local uiWaitCount = 0
@@ -144,13 +147,18 @@ repeat
     uiWaitCount = uiWaitCount + 1
     if uiWaitCount > 900 then
         warn("Atomware: UI failed to initialise after 15s — aborting.")
+        if _G.AtomwareUnload then pcall(_G.AtomwareUnload) end
         return
     end
 until _G.AtomwareUILoaded and _G.AtomwareEvents and _G.OnToggle
 
 -- 3. Load Shared Features Engine
 if not _G.AtomwareFeaturesLoaded then
-    loadRemote("features.lua")
+    if not loadRemote("features.lua") then
+        warn("Atomware: feature backend could not be loaded; cleaning up startup.")
+        if _G.AtomwareUnload then pcall(_G.AtomwareUnload) end
+        return
+    end
 end
 
 -- 4. Verify everything is online (timeout after 15 s)
@@ -160,6 +168,7 @@ repeat
     verifyCount = verifyCount + 1
     if verifyCount > 900 then
         warn("Atomware: Features failed to mark loaded after 15s — check features.lua for errors.")
+        if _G.AtomwareUnload then pcall(_G.AtomwareUnload) end
         break
     end
 until _G.AtomwareUILoaded and _G.AtomwareFeaturesLoaded

@@ -1,7 +1,7 @@
 --[[
     FeaturesScript.lua (features.lua)
     Optimized Backend Features Engine for Atomware (Trident Survival)
-    Contains Complete Radium.cc Port, Advanced Mobile/Controller Aimbot, ESPs & Performance Caching
+    Contains ESPs, world/player features, and performance caching
 ]]
 
 local Players = game:GetService("Players")
@@ -24,6 +24,47 @@ local function trackTask(thread)
     return thread
 end
 local OwnedDrawings = {}
+local HookRestorers = {}
+local function trackHook(target, replacement)
+    if type(hookfunction) ~= "function" then return nil end
+    local ok, original = pcall(function() return hookfunction(target, replacement) end)
+    if not ok or type(original) ~= "function" then return nil end
+    table.insert(HookRestorers, { Target = target, Original = original })
+    return original
+end
+
+if _G.AtomwareConfig then
+    _G.AtomwareConfig:OnUnload(function()
+        local restored = true
+        local hasTrackedRemoteHook, remoteHookRestored = false, true
+        for index = #HookRestorers, 1, -1 do
+            local hook = HookRestorers[index]
+            local ok = pcall(function() hookfunction(hook.Target, hook.Original) end)
+            if not ok then restored = false end
+            if hook.Target == _G.AtomwareRemoteHookTarget then
+                hasTrackedRemoteHook = true
+                remoteHookRestored = ok
+            end
+        end
+        -- Older versions did not retain the target function for this hook.
+        if _G.AtomwareRemoteHookInstalled and _G.AtomwareOriginalFireServer and not hasTrackedRemoteHook then
+            local ok = pcall(function()
+                hookfunction(Instance.new("RemoteEvent").FireServer, _G.AtomwareOriginalFireServer)
+            end)
+            remoteHookRestored = ok
+        end
+        table.clear(HookRestorers)
+        if remoteHookRestored then
+            _G.AtomwareOriginalFireServer = nil
+            _G.AtomwareRemoteHookInstalled = nil
+            _G.AtomwareRemoteHookTarget = nil
+        else
+            restored = false
+        end
+        if not restored then warn("Atomware: this executor could not restore one or more function hooks; disabled hooks are being kept safe.") end
+    end)
+end
+
 local function newDrawing(kind)
     local drawing = Drawing.new(kind)
     if _G.AtomwareCleanup and _G.AtomwareCleanup.TrackDrawing then
@@ -61,197 +102,6 @@ end))
 --//==================================================
 
 repeat task.wait() until _G.OnToggle and _G.OnSlider and _G.OnDropdown and _G.OnColorPicker
-
---//==================================================
---// AIMBOT & AIMLOCK ENGINE (DESKTOP, CONTROLLER & MOBILE)
---//==================================================
-
-local AimbotConfig = {
-    Enabled = false,
-    Mode = "Controller Bind", -- "Controller Bind" | "Always On" | "Hold Toggle"
-    ShowFOV = true,
-    FOV = 130,
-    Smoothing = 0.15,
-    HitPart = "Head",
-    TeamCheck = true,
-    AimKey = Enum.UserInputType.MouseButton2,
-    AimKeyName = "MouseButton2",
-    Active = false,
-    ToggleState = false,
-    LockedTarget = nil
-}
-
-local FOVCircle = newDrawing("Circle")
-FOVCircle.Visible = false
-FOVCircle.Thickness = 1.5
-FOVCircle.Color = Color3.fromRGB(184, 73, 255)
-FOVCircle.Filled = false
-FOVCircle.NumSides = 64
-
-local function getTargetHitPart(model)
-    local part = model:FindFirstChild(AimbotConfig.HitPart)
-    if not part then
-        part = model:FindFirstChild("Head") or model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso") or model:FindFirstChild("HumanoidRootPart")
-    end
-    return part
-end
-
-local function getClosestTargetInFOV()
-    local closestPart = nil
-    local shortestDistance = AimbotConfig.FOV
-    local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-
-    -- 1. Check Player Characters
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            if not (AimbotConfig.TeamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team) then
-                local char = player.Character
-                if char then
-                    local part = getTargetHitPart(char)
-                    if part then
-                        local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
-                        if onScreen then
-                            local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
-                            if screenDist <= shortestDistance then
-                                shortestDistance = screenDist
-                                closestPart = part
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- 2. Check Custom Workspace Character Models (Trident Survival)
-    for _, model in ipairs(Workspace:GetChildren()) do
-        if model:IsA("Model") and model ~= LocalPlayer.Character and not Players:GetPlayerFromCharacter(model) then
-            local part = getTargetHitPart(model)
-            if part then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
-                if onScreen then
-                    local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
-                    if screenDist <= shortestDistance then
-                        shortestDistance = screenDist
-                        closestPart = part
-                    end
-                end
-            end
-        end
-    end
-
-    return closestPart
-end
-
--- Input Listeners for Aimbot
--- NOTE: For mouse buttons, AimKey is a UserInputType (e.g. MouseButton2).
---       For keyboard/gamepad buttons, AimKey is a KeyCode (e.g. ButtonR2, E).
---       We must check BOTH independently because gamepad input reports Gamepad1
---       as UserInputType and the actual button (such as ButtonR2) as KeyCode.
-trackConnection(UserInputService.InputBegan:Connect(function(input, gpe)
-    local keyMatch = (input.UserInputType == AimbotConfig.AimKey)
-        or (input.KeyCode == AimbotConfig.AimKey)
-    if not keyMatch then return end
-
-    if AimbotConfig.Mode == "Hold Toggle" then
-        AimbotConfig.ToggleState = not AimbotConfig.ToggleState
-        AimbotConfig.LockedTarget = AimbotConfig.ToggleState and getClosestTargetInFOV() or nil
-    else
-        -- "Controller Bind" and any other mode: hold-to-aim
-        AimbotConfig.Active = true
-        AimbotConfig.LockedTarget = getClosestTargetInFOV()
-    end
-end))
-
-trackConnection(UserInputService.InputEnded:Connect(function(input)
-    local keyMatch = (input.UserInputType == AimbotConfig.AimKey)
-        or (input.KeyCode == AimbotConfig.AimKey)
-    if not keyMatch then return end
-
-    -- Only release aim on key-up for hold-style modes
-    if AimbotConfig.Mode == "Controller Bind" then
-        AimbotConfig.Active = false
-        AimbotConfig.LockedTarget = nil
-    end
-    -- "Hold Toggle" and "Always On" are unaffected by key release
-end))
-
--- Mobile & Controller Global Aim Triggers
-_G.OnToggle("MobileAimTrigger", function(state)
-    AimbotConfig.Active = state
-    AimbotConfig.ToggleState = state
-    AimbotConfig.LockedTarget = state and getClosestTargetInFOV() or nil
-end)
-
--- ControllerAimToggle fires from the RB button in main_ui or from mobile UI.
--- Behaviour depends on the active mode so the right state variable is flipped.
-_G.OnToggle("ControllerAimToggle", function()
-    if AimbotConfig.Mode == "Hold Toggle" then
-        AimbotConfig.ToggleState = not AimbotConfig.ToggleState
-        AimbotConfig.LockedTarget = AimbotConfig.ToggleState and getClosestTargetInFOV() or nil
-    elseif AimbotConfig.Mode == "Controller Bind" then
-        -- In Controller Bind mode the RB shortcut acts as a software toggle
-        AimbotConfig.Active = not AimbotConfig.Active
-        AimbotConfig.LockedTarget = AimbotConfig.Active and getClosestTargetInFOV() or nil
-    end
-    -- "Always On" needs no toggle — aim is driven by AimbotConfig.Enabled alone
-end)
-
-RunService:BindToRenderStep("AtomwareAimbot", Enum.RenderPriority.Camera.Value + 1, function(dt)
-    local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    FOVCircle.Position = viewportCenter
-    FOVCircle.Radius = AimbotConfig.FOV
-    FOVCircle.Visible = AimbotConfig.Enabled and AimbotConfig.ShowFOV
-
-    if AimbotConfig.Enabled then
-        local shouldAim = false
-        if AimbotConfig.Mode == "Always On" then
-            shouldAim = true
-        elseif AimbotConfig.Mode == "Hold Toggle" then
-            shouldAim = AimbotConfig.ToggleState
-        else
-            shouldAim = AimbotConfig.Active
-        end
-
-        if shouldAim then
-            local target = AimbotConfig.LockedTarget
-            if not target or not target.Parent or not target:IsDescendantOf(Workspace) then
-                target = getClosestTargetInFOV()
-                AimbotConfig.LockedTarget = target
-            end
-            if target then
-                local currentCF = Camera.CFrame
-                local targetCF = CFrame.new(currentCF.Position, target.Position)
-                local smoothing = math.clamp(AimbotConfig.Smoothing, 0.01, 1)
-                local alpha = 1 - ((1 - smoothing) ^ (math.max(dt, 1 / 240) * 60))
-                Camera.CFrame = currentCF:Lerp(targetCF, math.clamp(alpha, 0.01, 1))
-            end
-        else
-            AimbotConfig.LockedTarget = nil
-        end
-    else
-        AimbotConfig.LockedTarget = nil
-    end
-end)
-if _G.AtomwareConfig then
-    _G.AtomwareConfig:OnUnload(function() RunService:UnbindFromRenderStep("AtomwareAimbot") end)
-end
-
-_G.OnToggle("Aimbot Enabled", function(s) AimbotConfig.Enabled = s end)
-_G.OnDropdown("Aimbot Mode", function(m) AimbotConfig.Mode = m end)
-_G.OnToggle("Show FOV Circle", function(s) AimbotConfig.ShowFOV = s end)
-_G.OnSlider("Aimbot FOV", function(v) AimbotConfig.FOV = v end)
-_G.OnSlider("Aimbot Smoothing", function(v) AimbotConfig.Smoothing = v end)
-_G.OnDropdown("Aim Hit Part", function(p) AimbotConfig.HitPart = p end)
-_G.OnToggle("Aimbot Team Check", function(s) AimbotConfig.TeamCheck = s end)
-_G.OnKeybind("Aim Key", function(keyName)
-    AimbotConfig.AimKeyName = keyName
-    if Enum.UserInputType[keyName] then
-        AimbotConfig.AimKey = Enum.UserInputType[keyName]
-    elseif Enum.KeyCode[keyName] then
-        AimbotConfig.AimKey = Enum.KeyCode[keyName]
-    end
-end)
 
 --//==================================================
 --// BIG HEAD HITBOX MODIFIER
@@ -616,7 +466,7 @@ _G.OnColorPicker("Text Color", function(c) Color_Text = c end)
 local ArmorESP_Enabled = false
 local ArmorFOV_Radius = 220
 
--- FOV circle for Armor ESP (green, separate from the aimbot purple circle)
+-- FOV circle for Armor ESP
 local ArmorFOVCircle = newDrawing("Circle")
 ArmorFOVCircle.Visible = false
 ArmorFOVCircle.Thickness = 1.5
@@ -1989,7 +1839,7 @@ trackConnection(Workspace.DescendantAdded:Connect(checkHitSound))
 -- Wrapped in pcall — silently skipped if executor doesn't support hookfunction
 pcall(function()
     local oldPlay = Instance.new("Sound").Play
-    hookfunction(oldPlay, newcclosure(function(self, ...)
+    trackHook(oldPlay, newcclosure(function(self, ...)
         if (HitmarkerConfig.Enabled or HitSoundConfig.Enabled)
             and self.Name:lower():find("head") then
             showHitmarker()
@@ -2164,8 +2014,9 @@ _G.AtomwareForceHeadshots = false
 trackTask(task.spawn(function()
     if _G.AtomwareRemoteHookInstalled then return end
     pcall(function()
-        _G.AtomwareOriginalFireServer = hookfunction(
-            Instance.new("RemoteEvent").FireServer,
+        local fireServerTarget = Instance.new("RemoteEvent").FireServer
+        local originalFireServer
+        originalFireServer = trackHook(fireServerTarget,
             newcclosure(function(self, ...)
                 local args = { ... }
                 if _G.AtomwareForceHeadshots then
@@ -2199,10 +2050,13 @@ trackTask(task.spawn(function()
                         end
                     end
                 end
-                return _G.AtomwareOriginalFireServer(self, ...)
-            end)
-        )
-        _G.AtomwareRemoteHookInstalled = true
+                return originalFireServer(self, ...)
+            end))
+        if originalFireServer then
+            _G.AtomwareOriginalFireServer = originalFireServer
+            _G.AtomwareRemoteHookInstalled = true
+            _G.AtomwareRemoteHookTarget = fireServerTarget
+        end
     end)
 end))
 

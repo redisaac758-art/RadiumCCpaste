@@ -28,7 +28,10 @@ local function registerAtomwareEvent(name, callback)
     local pending = _G.AtomwarePendingEvents[name]
     if pending then
         _G.AtomwarePendingEvents[name] = nil
-        task.spawn(callback, table.unpack(pending, 1, pending.n))
+        task.spawn(function()
+            local ok, err = pcall(callback, table.unpack(pending, 1, pending.n))
+            if not ok then warn("Atomware: event '" .. name .. "' failed: " .. tostring(err)) end
+        end)
     end
 end
 
@@ -57,7 +60,15 @@ _G.FireEvent = function(name, ...)
         _G.AtomwareConfig:Store(name, (...))
     end
     local callback = _G.AtomwareEvents[name]
-    if callback then task.spawn(callback, ...); return end
+    if callback then
+        local args = { ... }
+        local count = select("#", ...)
+        task.spawn(function()
+            local ok, err = pcall(callback, table.unpack(args, 1, count))
+            if not ok then warn("Atomware: event '" .. name .. "' failed: " .. tostring(err)) end
+        end)
+        return
+    end
     local args = { ... }
     args.n = select("#", ...)
     _G.AtomwarePendingEvents[name] = args
@@ -960,18 +971,6 @@ createToggle(bVehicles, "Vehicle Distance Esp", false)
 -- ---------------------------------------------------
 local pCombat = Pages["Combat"]
 
-local _, bAimbot = createCard(pCombat, "Aimbot Settings")
-createToggle(bAimbot, "Aimbot Enabled", false)
--- Mode strings must match features.lua checks exactly:
--- "Controller Bind" = hold key to aim, "Hold Toggle" = tap to toggle, "Always On" = always aims
-createDropdown(bAimbot, "Aimbot Mode", { "Controller Bind", "Always On", "Hold Toggle" }, "Controller Bind")
-createToggle(bAimbot, "Show FOV Circle", true)
-createSlider(bAimbot, "Aimbot FOV", 10, 500, 130, 5, "px")
-createSlider(bAimbot, "Aimbot Smoothing", 0.01, 1, 0.15, 0.01, "")
-createDropdown(bAimbot, "Aim Hit Part", { "Head", "UpperTorso", "HumanoidRootPart" }, "Head")
-createToggle(bAimbot, "Aimbot Team Check", true)
-createKeybind(bAimbot, "Aim Key", "MouseButton2")
-
 local _, bBigHead = createCard(pCombat, "Big Head Hitbox")
 createToggle(bBigHead, "Big Head", false)
 createSlider(bBigHead, "Head Size", 1, 10, 2, 1, "x")
@@ -1208,8 +1207,6 @@ trackConnection(UserInputService.InputBegan:Connect(function(input, gpe)
     if input.UserInputType == Enum.UserInputType.Gamepad1 then
         if input.KeyCode == Enum.KeyCode.ButtonL1 then
             setUIVisible(not UIVisible)
-        elseif input.KeyCode == Enum.KeyCode.ButtonR1 then
-            _G.FireEvent("ControllerAimToggle")
         elseif input.KeyCode == Enum.KeyCode.DPadDown then
             focusedIndex = focusedIndex + 1
             updateControllerNav()
@@ -1242,6 +1239,5 @@ trackConnection(UserInputService.InputBegan:Connect(function(input, gpe)
         setUIVisible(not UIVisible)
     end
 end))
-
 _G.AtomwareUILoaded = true
 print("Good to go")

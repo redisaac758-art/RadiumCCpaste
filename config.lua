@@ -22,6 +22,8 @@ local Config = {
     FPSCounterVisible = false,
     FPSCounter = nil,
     ActiveToasts = {},
+    NotificationQueue = {},
+    NotificationWorker = false,
     CustomCursorVisible = false,
     WatermarkColor = Color3.fromRGB(205, 104, 255),
     CursorWasEnabled = UserInputService.MouseIconEnabled,
@@ -220,7 +222,7 @@ function Config:AttachUI(screenGui, deviceName)
     fpsCounter.Name = "AtomwareFPSCounter"
     fpsCounter.AnchorPoint = Vector2.new(0, 0)
     fpsCounter.Position = UDim2.new(0, 12, 0, 12)
-    fpsCounter.Size = UDim2.fromOffset(100, 26)
+    fpsCounter.Size = UDim2.fromOffset(174, 26)
     fpsCounter.BackgroundColor3 = Color3.fromRGB(10, 7, 20)
     fpsCounter.BackgroundTransparency = 0.15
     fpsCounter.TextColor3 = Config.WatermarkColor
@@ -233,12 +235,23 @@ function Config:AttachUI(screenGui, deviceName)
     fpsCorner.CornerRadius = UDim.new(0, 7)
     fpsCorner.Parent = fpsCounter
     Config.FPSCounter = fpsCounter
-    local elapsed, frames = 0, 0
+    local elapsed, frames, statsElapsed, memoryText = 0, 0, 0, ""
     Config:TrackConnection(game:GetService("RunService").RenderStepped:Connect(function(dt)
+        if not fpsCounter.Visible then
+            elapsed, frames, statsElapsed, memoryText = 0, 0, 0, ""
+            return
+        end
         frames = frames + 1
         elapsed = elapsed + dt
-        if elapsed >= 0.5 then
-            fpsCounter.Text = "FPS: " .. tostring(math.floor(frames / elapsed + 0.5))
+        statsElapsed = statsElapsed + dt
+        if elapsed >= 1 then
+            local fps = math.floor(frames / elapsed + 0.5)
+            if statsElapsed >= 2 then
+                statsElapsed = 0
+                local ok, memoryMb = pcall(function() return game:GetService("Stats"):GetTotalMemoryUsageMb() end)
+                if ok and type(memoryMb) == "number" then memoryText = "  •  " .. tostring(math.floor(memoryMb + 0.5)) .. " MB" end
+            end
+            fpsCounter.Text = "FPS: " .. tostring(fps) .. memoryText
             frames, elapsed = 0, 0
         end
     end))
@@ -367,41 +380,45 @@ function Config:SetNotificationCorner(value)
 end
 
 function Config:Notify(message, duration)
-    if not Config.ScreenGui then return end
-    local top = Config.NotificationCorner:sub(1, 3) == "Top"
-    local left = Config.NotificationCorner:sub(-4) == "Left"
-    local toast = Instance.new("TextLabel")
-    toast.BackgroundColor3 = Color3.fromRGB(10, 7, 20)
-    toast.BackgroundTransparency = 0.08
-    toast.TextColor3 = Color3.fromRGB(245, 241, 255)
-    toast.TextWrapped = true
-    toast.Text = tostring(message)
-    toast.TextSize = 12
-    toast.Font = Enum.Font.GothamMedium
-    toast.AnchorPoint = Vector2.new(left and 0 or 1, top and 0 or 1)
-    toast.Position = UDim2.new(left and 0 or 1, left and 12 or -12, top and 0 or 1, top and 12 or -12)
-    toast.Size = UDim2.fromOffset(230, 42)
-    toast.ZIndex = 120
-    toast.Parent = Config.ScreenGui
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 7)
-    corner.Parent = toast
-    table.insert(Config.ActiveToasts, toast)
-    local function arrangeToasts()
-        for index, activeToast in ipairs(Config.ActiveToasts) do
-            local offset = (index - 1) * 48
-            activeToast.Position = UDim2.new(left and 0 or 1, left and 12 or -12,
-                top and 0 or 1, top and (12 + offset) or (-12 - offset))
+    if not Config.ScreenGui or Config.Unloaded then return end
+    if #Config.NotificationQueue >= 20 then table.remove(Config.NotificationQueue, 1) end
+    table.insert(Config.NotificationQueue, {
+        Message = tostring(message),
+        Duration = math.clamp(tonumber(duration) or 3, 1, 10),
+    })
+    if Config.NotificationWorker then return end
+    Config.NotificationWorker = true
+    Config:TrackTask(task.spawn(function()
+        while #Config.NotificationQueue > 0 and Config.ScreenGui and not Config.Unloaded do
+            local item = table.remove(Config.NotificationQueue, 1)
+            local top = Config.NotificationCorner:sub(1, 3) == "Top"
+            local left = Config.NotificationCorner:sub(-4) == "Left"
+            local toast = Instance.new("TextLabel")
+            toast.Name = "AtomwareNotification"
+            toast.BackgroundColor3 = Color3.fromRGB(10, 7, 20)
+            toast.BackgroundTransparency = 0.08
+            toast.TextColor3 = Color3.fromRGB(245, 241, 255)
+            toast.TextWrapped = true
+            toast.Text = item.Message
+            toast.TextSize = 12
+            toast.Font = Enum.Font.GothamMedium
+            toast.AnchorPoint = Vector2.new(left and 0 or 1, top and 0 or 1)
+            toast.Position = UDim2.new(left and 0 or 1, left and 12 or -12, top and 0 or 1, top and 12 or -12)
+            toast.Size = UDim2.fromOffset(230, 42)
+            toast.ZIndex = 120
+            toast.Parent = Config.ScreenGui
+            local toastCorner = Instance.new("UICorner")
+            toastCorner.CornerRadius = UDim.new(0, 7)
+            toastCorner.Parent = toast
+            table.insert(Config.ActiveToasts, toast)
+            task.wait(item.Duration)
+            for index, activeToast in ipairs(Config.ActiveToasts) do
+                if activeToast == toast then table.remove(Config.ActiveToasts, index) break end
+            end
+            if toast.Parent then toast:Destroy() end
         end
-    end
-    arrangeToasts()
-    task.delay(math.clamp(tonumber(duration) or 3, 1, 10), function()
-        for index, activeToast in ipairs(Config.ActiveToasts) do
-            if activeToast == toast then table.remove(Config.ActiveToasts, index) break end
-        end
-        if toast.Parent then toast:Destroy() end
-        arrangeToasts()
-    end)
+        Config.NotificationWorker = false
+    end))
 end
 
 function Config:OnUnload(callback)
@@ -415,6 +432,10 @@ end
 function Config:Unload(screenGui)
     if Config.Unloaded then return end
     Config.Unloaded = true
+    screenGui = screenGui or Config.ScreenGui
+    table.clear(Config.NotificationQueue)
+    for _, toast in ipairs(Config.ActiveToasts) do pcall(function() toast:Destroy() end) end
+    table.clear(Config.ActiveToasts)
     -- Turn off active boolean features while their callbacks are still live.
     for name, default in pairs(Config.Defaults) do
         if type(default) == "boolean" then
@@ -440,11 +461,19 @@ function Config:Unload(screenGui)
     end
     UserInputService.MouseIconEnabled = cursorEnabled
     if screenGui then pcall(function() screenGui:Destroy() end) end
+    Config.ScreenGui = nil
+    Config.Watermark = nil
+    Config.KeybindPanel = nil
+    Config.CustomCursor = nil
+    Config.FPSCounter = nil
     _G.AtomwareUILoaded = false
     _G.AtomwareFeaturesLoaded = false
     _G.AtomwareEvents = nil
     _G.AtomwarePendingEvents = nil
     _G.OnToggle, _G.OnSlider, _G.OnDropdown, _G.OnColorPicker, _G.OnKeybind, _G.FireEvent = nil, nil, nil, nil, nil, nil
+    _G.AtomwareConfig = nil
+    _G.AtomwareCleanup = nil
+    _G.AtomwareUnload = nil
 end
 
 _G.AtomwareConfig = Config

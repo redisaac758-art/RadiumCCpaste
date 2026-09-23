@@ -1,7 +1,7 @@
 --[[
     mobile_ui.lua
     Ultra-Polished Mobile UI for Atomware (Trident Survival)
-    Two-column compact layout, dynamic aim toggle, controller bind selector
+    Two-column compact layout with draggable mobile controls
 ]]
 
 local Players = game:GetService("Players")
@@ -28,7 +28,10 @@ local function registerAtomwareEvent(name, callback)
     local pending = _G.AtomwarePendingEvents[name]
     if pending then
         _G.AtomwarePendingEvents[name] = nil
-        task.spawn(callback, table.unpack(pending, 1, pending.n))
+        task.spawn(function()
+            local ok, err = pcall(callback, table.unpack(pending, 1, pending.n))
+            if not ok then warn("Atomware: event '" .. name .. "' failed: " .. tostring(err)) end
+        end)
     end
 end
 
@@ -57,7 +60,15 @@ _G.FireEvent = function(name, ...)
         _G.AtomwareConfig:Store(name, (...))
     end
     local callback = _G.AtomwareEvents[name]
-    if callback then task.spawn(callback, ...); return end
+    if callback then
+        local args = { ... }
+        local count = select("#", ...)
+        task.spawn(function()
+            local ok, err = pcall(callback, table.unpack(args, 1, count))
+            if not ok then warn("Atomware: event '" .. name .. "' failed: " .. tostring(err)) end
+        end)
+        return
+    end
     local args = { ... }
     args.n = select("#", ...)
     _G.AtomwarePendingEvents[name] = args
@@ -170,7 +181,10 @@ local function configureMobileControl(frame, name, defaultX, defaultY)
     local scale = Instance.new("UIScale")
     scale.Scale = mobileControlScale
     scale.Parent = frame
-    table.insert(mobileLayoutControls, { frame = frame, scale = scale })
+    table.insert(mobileLayoutControls, {
+        frame = frame, scale = scale, name = name,
+        defaultX = defaultX, defaultY = defaultY,
+    })
 
     local grip = Instance.new("TextButton")
     grip.Name = "LayoutDragHandle"
@@ -201,8 +215,14 @@ local function configureMobileControl(frame, name, defaultX, defaultY)
             frame.AbsoluteSize.X * frame.AnchorPoint.X,
             frame.AbsoluteSize.Y * frame.AnchorPoint.Y
         ) + delta
-        local nx = math.clamp(center.X / camera.ViewportSize.X, 0.03, 0.97)
-        local ny = math.clamp(center.Y / camera.ViewportSize.Y, 0.03, 0.97)
+        local halfWidth = frame.AbsoluteSize.X * 0.5
+        local halfHeight = frame.AbsoluteSize.Y * 0.5
+        local minX, maxX = halfWidth / camera.ViewportSize.X, 1 - halfWidth / camera.ViewportSize.X
+        local minY, maxY = halfHeight / camera.ViewportSize.Y, 1 - halfHeight / camera.ViewportSize.Y
+        if minX > maxX then minX, maxX = 0.5, 0.5 end
+        if minY > maxY then minY, maxY = 0.5, 0.5 end
+        local nx = math.clamp(center.X / camera.ViewportSize.X, minX, maxX)
+        local ny = math.clamp(center.Y / camera.ViewportSize.Y, minY, maxY)
         frame.Position = UDim2.fromScale(nx, ny)
         if _G.AtomwareConfig then
             _G.AtomwareConfig:Store(name .. " X", nx)
@@ -211,7 +231,11 @@ local function configureMobileControl(frame, name, defaultX, defaultY)
         dragStart = input.Position
     end))
     trackConnection(UserInputService.InputEnded:Connect(function(input)
-        if dragging and (input == dragInput or input.UserInputType == Enum.UserInputType.MouseButton1) then dragging, dragInput = false, nil end
+        if dragging and dragInput then
+            local released = input == dragInput
+                or (dragInput.UserInputType == Enum.UserInputType.MouseButton1 and input.UserInputType == Enum.UserInputType.MouseButton1)
+            if released then dragging, dragInput = false, nil end
+        end
     end))
     return function(editing) grip.Visible = editing end
 end
@@ -225,6 +249,17 @@ end
 local function setMobileControlScale(value)
     mobileControlScale = math.clamp(value, 0.7, 1.5)
     for _, item in ipairs(mobileLayoutControls) do item.scale.Scale = mobileControlScale end
+end
+
+local function resetMobileLayout()
+    for _, item in ipairs(mobileLayoutControls) do
+        local x, y = item.defaultX, item.defaultY
+        item.frame.Position = UDim2.fromScale(x, y)
+        if _G.AtomwareConfig then
+            _G.AtomwareConfig:Store(item.name .. " X", x)
+            _G.AtomwareConfig:Store(item.name .. " Y", y)
+        end
+    end
 end
 
 local function makeFloatingButton(name, text, iconColor, initPos, onClick)
@@ -250,76 +285,8 @@ local function makeFloatingButton(name, text, iconColor, initPos, onClick)
     return btn
 end
 
--- Floating Menu Toggle only (the aim toggle is created dynamically per mode)
+-- Floating Menu Toggle
 local MobileToggleBtn
-
---//==================================================
---// HOLD TOGGLE AIM BUTTON (Dynamic — only for "Hold Toggle" mode)
--- Fixed position, non-draggable, large touch target.
--- Only the background colour changes on toggle — icon and position never change.
---//==================================================
-
-local mobileAimActive = false
-local holdToggleBtn = nil
-local holdToggleLayoutHandle = nil
-
-local function createHoldToggleBtn()
-    if holdToggleBtn then
-        holdToggleBtn:Destroy()
-        holdToggleBtn = nil
-    end
-
-    -- Outer container: fixed bottom-right, never moves
-    local btn = Instance.new("TextButton")
-    btn.Name = "HoldToggleAim"
-    btn.Size = UDim2.fromOffset(80, 80)
-    -- Anchor to bottom-right corner, 14px inset from each edge
-    btn.AnchorPoint = Vector2.new(0.5, 0.5)
-    btn.Position = UDim2.fromScale(0.91, 0.70)
-    btn.BackgroundColor3 = THEME.AccentDark
-    btn.AutoButtonColor = false
-    btn.Text = "🎯"
-    btn.TextSize = 32
-    btn.Font = FONT_BOLD
-    btn.TextColor3 = THEME.Text  -- colour never changes
-    btn.ZIndex = 20
-    btn.Parent = ScreenGui
-    corner(btn, 20)
-    holdToggleLayoutHandle = configureMobileControl(btn, "Aim Control", 0.91, 0.70)
-    table.insert(mobileLayoutHandles, holdToggleLayoutHandle)
-
-    -- Slightly thicker border so it stands out on screen
-    local btnStroke = stroke(btn, THEME.Accent, 2)
-
-    -- Tap: toggle aim state, only pulse the background colour
-    trackConnection(btn.MouseButton1Click:Connect(function()
-        mobileAimActive = not mobileAimActive
-        _G.FireEvent("MobileAimTrigger", mobileAimActive)
-
-        -- Active  → bright green fill + green border pulse
-        -- Inactive → dark accent fill + normal accent border
-        tween(btn, TweenInfo.new(0.12), {
-            BackgroundColor3 = mobileAimActive and THEME.Green or THEME.AccentDark
-        })
-        btnStroke.Color = mobileAimActive and THEME.Green or THEME.Accent
-    end))
-
-    -- No drag listeners — position is intentionally locked
-    holdToggleBtn = btn
-end
-
-local function destroyHoldToggleBtn()
-    if holdToggleBtn then
-        holdToggleBtn:Destroy()
-        holdToggleBtn = nil
-        for i, setVisible in ipairs(mobileLayoutHandles) do
-            if setVisible == holdToggleLayoutHandle then table.remove(mobileLayoutHandles, i) break end
-        end
-        holdToggleLayoutHandle = nil
-        mobileAimActive = false
-        _G.FireEvent("MobileAimTrigger", false)
-    end
-end
 
 --//==================================================
 --// MAIN WINDOW CONTAINER (FIXED NON-SCROLLING HEADER & TABS)
@@ -869,7 +836,7 @@ local function createDropdown(parent, setting, options, default, onChange)
             optionButton.TextColor3 = optionButton.Text == "  " .. tostring(selected) and THEME.AccentBright or THEME.TextMuted
         end
         if _G.AtomwareConfig then _G.AtomwareConfig:Store(setting, selected) end
-        if setting ~= "Controller Bind" then _G.FireEvent(setting, selected) end
+        _G.FireEvent(setting, selected)
         if onChange then onChange(selected) end
     end
 
@@ -1120,48 +1087,6 @@ createToggle(bVehicles, "Vehicle Distance Esp", false)
 -- ---------------------------------------------------
 local lCombat, rCombat = getCols("Combat")
 
--- LEFT COLUMN: Aimbot
-local _, bAimbot = createCard(lCombat, "Aimbot & Aimlock")
-createToggle(bAimbot, "Aimbot Enabled", false)
-
--- Controller bind selector row (hidden unless "Controller Bind" mode is active)
-local ctrlBindRow = createDropdown(bAimbot, "Controller Bind",
-    { "ButtonR2", "ButtonL2", "ButtonR3", "ButtonL3" }, "ButtonR2",
-    function(bind)
-        -- Fire "Aim Key" event so features.lua updates AimbotConfig.AimKey
-        _G.FireEvent("Aim Key", bind)
-    end
-)
-ctrlBindRow.Visible = false
-if _G.AtomwareConfig then
-    _G.AtomwareConfig:RegisterKeybind("Aim Key", function()
-        return _G.AtomwareConfig.Values["Controller Bind"] or "ButtonR2"
-    end)
-end
-
--- Aimbot Mode dropdown — onChange updates UI (ctrl bind row + hold toggle button)
-createDropdown(bAimbot, "Aimbot Mode",
-    { "Always On", "Hold Toggle", "Controller Bind" },
-    "Controller Bind",
-    function(mode)
-        -- Show/hide controller bind row
-        ctrlBindRow.Visible = (mode == "Controller Bind")
-
-        -- Show/destroy dynamic hold-toggle floating button
-        if mode == "Hold Toggle" then
-            createHoldToggleBtn()
-        else
-            destroyHoldToggleBtn()
-        end
-    end
-)
-
-createToggle(bAimbot, "Show FOV Circle", true)
-createSlider(bAimbot, "Aimbot FOV", 10, 500, 130, 5, "px")
-createSlider(bAimbot, "Aimbot Smoothing", 0.01, 1, 0.15, 0.01, "")
-createDropdown(bAimbot, "Aim Hit Part", { "Head", "UpperTorso", "HumanoidRootPart" }, "Head")
-createToggle(bAimbot, "Aimbot Team Check", true)
-
 -- RIGHT COLUMN: Big Head
 local _, bBigHead = createCard(rCombat, "Big Head Hitbox")
 createToggle(bBigHead, "Big Head", false)
@@ -1285,10 +1210,21 @@ local _, bMobileSet = createCard(lSettings, "Mobile Controls")
 createToggle(bMobileSet, "Edit Mobile Layout", false, setMobileLayoutEditing)
 _G.OnSlider("Mobile Control Scale", setMobileControlScale)
 createSlider(bMobileSet, "Mobile Control Scale", 0.7, 1.5, 1, 0.1, "x")
+local resetLayoutButton = Instance.new("TextButton")
+resetLayoutButton.Size = UDim2.new(1, 0, 0, 30)
+resetLayoutButton.BackgroundColor3 = THEME.CardAlt
+resetLayoutButton.Text = "Reset Control Positions"
+resetLayoutButton.TextColor3 = THEME.AccentBright
+resetLayoutButton.TextSize = 11
+resetLayoutButton.Font = FONT_BOLD
+resetLayoutButton.AutoButtonColor = false
+resetLayoutButton.Parent = bMobileSet
+corner(resetLayoutButton, 6)
+trackConnection(resetLayoutButton.MouseButton1Click:Connect(resetMobileLayout))
 local infoLbl = Instance.new("TextLabel")
 infoLbl.BackgroundTransparency = 1
-infoLbl.Text = "• Enable Edit Mobile Layout to drag controls\n• Use the scale slider to resize them\n• Layout is saved with profiles"
-infoLbl.Size = UDim2.new(1, 0, 0, 62)
+infoLbl.Text = "• Turn on Edit Mobile Layout, then drag the DRAG handles\n• Control positions and scale save with profiles\n• Reset Control Positions restores the defaults"
+infoLbl.Size = UDim2.new(1, 0, 0, 72)
 infoLbl.TextSize = 11
 infoLbl.TextColor3 = THEME.TextMuted
 infoLbl.Font = FONT
@@ -1393,8 +1329,6 @@ trackConnection(UserInputService.InputBegan:Connect(function(input, gpe)
     if input.UserInputType ~= Enum.UserInputType.Gamepad1 then return end
     if input.KeyCode == Enum.KeyCode.ButtonL1 then
         setUIVisible(not UIVisible)
-    elseif input.KeyCode == Enum.KeyCode.ButtonR1 then
-        _G.FireEvent("ControllerAimToggle")
     end
 end))
 
