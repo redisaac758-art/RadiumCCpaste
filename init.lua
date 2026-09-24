@@ -5,6 +5,7 @@
 ]]
 
 local ALLOWED_PLACE_ID = 13253735473
+local ALLOWED_PLACE_ID = 123974602339071
 local isAllowedGame = game.PlaceId == ALLOWED_PLACE_ID or game.GameId == ALLOWED_PLACE_ID
 if not isAllowedGame then
     if _G.AtomwareUnload and (_G.AtomwareUILoaded or _G.AtomwareFeaturesLoaded) then
